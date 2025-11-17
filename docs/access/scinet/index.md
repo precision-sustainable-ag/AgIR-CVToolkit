@@ -135,7 +135,7 @@ squeue -u $USER
 
 - **SciNet Documentation**: [scinet.usda.gov/guides](https://scinet.usda.gov/guides/)
 - **SciNet Support**: scinet-support@usda.gov
-- **AgIR Toolkit**: [GitHub Issues](https://github.com/your-org/AgIR-CVToolkit/issues)
+- **AgIR Toolkit**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
 
 ---
 

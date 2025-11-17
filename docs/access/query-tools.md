@@ -709,7 +709,7 @@ if count > 0 and count < 10000:
 - **[Explore SemiF Schema →](../dataset/semif.html)** - Understand available fields
 - **[Explore Field Schema →](../dataset/field.html)** - Understand available fields  
 - **[View Installation Guide →](installation.html)** - Setup and configuration
-- **[Full Toolkit Docs →](https://github.com/your-org/AgIR-CVToolkit)** - Complete pipeline features
+- **[Full Toolkit Docs →](https://github.com/precision-sustainable-ag/AgIR-CVToolkit)** - Complete pipeline features
 
 ---
 

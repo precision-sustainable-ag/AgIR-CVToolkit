@@ -86,5 +86,5 @@ LIMIT 100;
 - **New Users**: Start with [Installation & Setup](installation.html)
 - **Quick Start**: See [Query Guide examples](query-tools.html#common-query-patterns)
 - **Schema Questions**: Check [SemiF](../dataset/semif.html) or [Field](../dataset/field.html) documentation
-- **Issues**: [GitHub Issues](https://github.com/your-org/AgIR-CVToolkit/issues)
+- **Issues**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
 - **Support**: [support@example.com](mailto:support@example.com)

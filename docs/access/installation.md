@@ -44,7 +44,7 @@ For a controlled environment with all dependencies:
 conda install mamba -n base -c conda-forge
 
 # Clone repository
-git clone https://github.com/your-org/AgIR-CVToolkit.git
+git clone https://github.com/precision-sustainable-ag/AgIR-CVToolkit.git
 cd AgIR-CVToolkit
 
 # Create environment from file
@@ -182,7 +182,7 @@ For testing and learning, use the sample databases included in the repository:
 
 ```bash
 # Clone repository if you haven't already
-git clone https://github.com/your-org/AgIR-CVToolkit.git
+git clone https://github.com/precision-sustainable-ag/AgIR-CVToolkit.git
 cd AgIR-CVToolkit
 
 # Sample databases are in:
@@ -345,14 +345,14 @@ Now that you have the toolkit installed and configured:
 - **[Query Guide](query-tools.html)** - Complete query documentation
 - **[SemiF Schema](../dataset/semif.html)** - SemiF database fields
 - **[Field Schema](../dataset/field.html)** - Field database fields
-- **[Full Pipeline Docs](https://github.com/your-org/AgIR-CVToolkit)** - Complete toolkit features
+- **[Full Pipeline Docs](https://github.com/precision-sustainable-ag/AgIR-CVToolkit)** - Complete toolkit features
 
 ### Support
-- **GitHub Repository**: [AgIR-CVToolkit](https://github.com/your-org/AgIR-CVToolkit)
-- **Issues**: [Report bugs](https://github.com/your-org/AgIR-CVToolkit/issues)
-- **Discussions**: [Ask questions](https://github.com/your-org/AgIR-CVToolkit/discussions)
+- **GitHub Repository**: [AgIR-CVToolkit](https://github.com/precision-sustainable-ag/AgIR-CVToolkit)
+- **Issues**: [Report bugs](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
+- **Discussions**: [Ask questions](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/discussions)
 
 ---
 
 {: .note }
-> This guide covers installation for database querying only. For the full CV pipeline (inference, annotation, training), see the [complete installation guide](https://github.com/your-org/AgIR-CVToolkit/docs/GETTING_STARTED/installation.md).
+> This guide covers installation for database querying only. For the full CV pipeline (inference, annotation, training), see the [complete installation guide](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/docs/GETTING_STARTED/installation.md).
