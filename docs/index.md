@@ -135,38 +135,8 @@ Browse the sections below to learn about each database.
   </div>
   
   <div class="sponsor-logo-item">
-    <a href="#" title="Organization 3">
-      <img src="assets/images/sponsors/logo-3.png" alt="Organization 3">
-    </a>
-  </div>
-  
-  <div class="sponsor-logo-item">
-    <a href="#" title="Organization 4">
-      <img src="assets/images/sponsors/logo-4.png" alt="Organization 4">
-    </a>
-  </div>
-  
-  <div class="sponsor-logo-item">
-    <a href="#" title="Organization 5">
-      <img src="assets/images/sponsors/logo-5.png" alt="Organization 5">
-    </a>
-  </div>
-  
-  <div class="sponsor-logo-item">
-    <a href="#" title="Organization 6">
-      <img src="assets/images/sponsors/logo-6.png" alt="Organization 6">
-    </a>
-  </div>
-  
-  <div class="sponsor-logo-item">
-    <a href="#" title="Organization 7">
-      <img src="assets/images/sponsors/logo-7.png" alt="Organization 7">
-    </a>
-  </div>
-  
-  <div class="sponsor-logo-item">
-    <a href="#" title="Organization 8">
-      <img src="assets/images/sponsors/logo-8.png" alt="Organization 8">
+    <a href="#" title="American Sugarbeets Growers Associations">
+      <img src="assets/images/sponsors/American Sugarbeets Growers Associations.png" alt="Organization 3">
     </a>
   </div>
 
