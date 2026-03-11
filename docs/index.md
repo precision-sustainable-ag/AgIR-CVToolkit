@@ -29,7 +29,7 @@ This repository is a product of the **Digital Agricultural Systems Hub**, a coll
   
 <div class="sponsors-logo-grid">
   
-  <div class="sponsor-logo-item">
+  <div class="sponsor-logo-item primary-sponsor">
     <a href="https://digitalagsystemshub.org" title="Digital Agricultural Systems Hub">
       <img src="assets/images/logos/DASH BW LOGO full no mark NO BG.png" alt="Digital Agricultural Systems Hub">
     </a>

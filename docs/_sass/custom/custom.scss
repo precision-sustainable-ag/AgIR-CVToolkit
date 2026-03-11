@@ -367,9 +367,18 @@ th {
   transform: scale(1.02);
 }
 
+
+// ==========================================
+// SPONSORS SECTION - PRIMARY SPONSOR LOGO
+// ==========================================
+
+
+.primary-sponsor img {
+  max-height: 200px;
+}
+
 // ==========================================
 // ACKNOWLEDGEMENTS SECTION - SIMPLE LOGO GRID
-// Add this to your existing docs/_sass/custom/custom.scss
 // ==========================================
 
 .acknowledgements-simple {
