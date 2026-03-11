@@ -59,3 +59,6 @@ output:
 # Source configuration (automatically populated from query stage)
 source:
   db: "semif"  # Database used in query
+  custom:
+    enabled: false
+    image_dir: "/home/mkutuga/svs-raw-api/data/jpgs/MD_2025-10-20"  # Custom directory if applicable

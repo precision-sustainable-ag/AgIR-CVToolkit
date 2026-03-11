@@ -1,13 +1,14 @@
 """
-Segmentation inference pipeline stage.
+Segmentation inference pipeline stage - Refactored.
 
 Usage:
     agir-cvtoolkit infer-seg --override model.ckpt_path=/path/to/model.ckpt
 """
 from __future__ import annotations
 
-import json
 import ast
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional
@@ -33,46 +34,615 @@ import logging
 log = logging.getLogger(__name__)
 
 
-class SegmentationInferenceStage:
-    """
-    Segmentation inference pipeline stage.
+# ============================================================================
+# Data Classes for Configuration
+# ============================================================================
+
+@dataclass
+class InferenceConfig:
+    """Configuration extracted from DictConfig for easier access."""
+    # Source
+    source_type: str
+    db_name: str
+    image_mode: str
     
-    Reads records from AgirDB query results, runs tiled inference,
-    and outputs masks, visualizations, and cutouts.
-    """
+    # Custom mode
+    custom_enabled: bool
+    custom_mode: Optional[str]
+    custom_image_dir: Optional[Path]
+    custom_label_json_path: Optional[Path]
+    
+    # Model
+    model_ckpt: Path
+    
+    # Post-processing
+    threshold: float
+    min_area: int
+    edge_threshold: Optional[float]
+    
+    # Output
+    save_masks: bool
+    save_images: bool
+    save_cutouts: bool
+    save_viz: bool
+    save_colorized: bool
+    cutout_use_rgba: bool
+    
+    # Colorization
+    colorize_brightness: float
+    colorize_rgb_field: str
+    
+    @classmethod
+    def from_hydra(cls, cfg: DictConfig) -> InferenceConfig:
+        """Create InferenceConfig from Hydra DictConfig."""
+        seg_cfg = cfg.seg_inference
+        source = seg_cfg.source
+        custom = source.get("custom", {})
+        output = seg_cfg.output
+        
+        return cls(
+            source_type=source.type,
+            db_name=source.db,
+            image_mode=source.get("image_mode", "cutout"),
+            custom_enabled=custom.get("enabled", False),
+            custom_mode=custom.get("mode"),
+            custom_image_dir=Path(custom["image_dir"]) if custom.get("image_dir") else None,
+            custom_label_json_path=Path(custom["label_json_path"]) if custom.get("label_json_path") else None,
+            model_ckpt=Path(seg_cfg.model.ckpt_path),
+            threshold=seg_cfg.post_process.threshold,
+            min_area=seg_cfg.post_process.get("min_area", 0),
+            edge_threshold=seg_cfg.post_process.get("edge_occupancy_threshold"),
+            save_masks=output.get("save_masks", True),
+            save_images=output.get("save_images", False),
+            save_cutouts=output.get("save_cutouts", True),
+            save_viz=output.get("save_viz", False),
+            save_colorized=output.get("save_colorized_masks", False),
+            cutout_use_rgba=output.get("cutout_use_rgba", False),
+            colorize_brightness=output.get("colorize_brightness", 6.5),
+            colorize_rgb_field=output.get("colorize_rgb_field", "category_rgb"),
+        )
+
+
+# ============================================================================
+# Record Loading
+# ============================================================================
+
+class RecordLoader:
+    """Handles loading records from various sources."""
+    
+    def __init__(self, cfg: DictConfig, infer_cfg: InferenceConfig):
+        self.cfg = cfg
+        self.infer_cfg = infer_cfg
+        self.run_root = Path(cfg.paths.run_root)
+    
+    def load_records(self) -> List[Dict]:
+        """Load records based on configured source type."""
+        if self.infer_cfg.custom_enabled:
+            return self._load_custom_records()
+        elif self.infer_cfg.source_type == "query_result":
+            return self._load_query_results()
+        elif self.infer_cfg.source_type == "db_query":
+            return self._load_db_query()
+        else:
+            raise ValueError(f"Unknown source type: {self.infer_cfg.source_type}")
+    
+    def _load_custom_records(self) -> List[Dict]:
+        """Load records from custom JSON file."""
+        log.info("Loading records from custom source...")
+        json_path = self.infer_cfg.custom_label_json_path
+        
+        if not json_path or not json_path.exists():
+            raise FileNotFoundError(f"Custom label JSON not found: {json_path}")
+        
+        with open(json_path, 'r') as f:
+            records = json.load(f)
+        
+        log.info(f"Loaded {len(records)} records from custom source")
+        return records
+    
+    def _load_query_results(self) -> List[Dict]:
+        """Load records from previous query stage results."""
+        query_json = self.run_root / "query" / "query.json"
+        query_csv = self.run_root / "query" / "query.csv"
+        
+        # Try JSON first
+        if query_json.exists():
+            log.info(f"Loading records from: {query_json}")
+            with open(query_json) as f:
+                return json.load(f)
+        
+        # Fall back to CSV
+        if query_csv.exists():
+            log.info(f"Loading records from: {query_csv}")
+            return self._load_csv_records(query_csv)
+        
+        raise FileNotFoundError("No previous query results found (query.json or query.csv)")
+    
+    def _load_csv_records(self, csv_path: Path) -> List[Dict]:
+        """Load and process CSV records."""
+        try:
+            df = pd.read_csv(csv_path)
+        except pd.errors.EmptyDataError:
+            log.info("CSV file is empty")
+            return []
+        
+        if df.empty:
+            return []
+        
+        log.info(f"Loaded {len(df)} records from CSV")
+        
+        # Clean up data
+        df = df.where(pd.notnull(df), None)
+        df = df[df['bbox_xywh'].notna() & (df['bbox_xywh'] != '')]
+        
+        log.info(f"Filtered to {len(df)} valid records")
+        return df.to_dict(orient="records")
+    
+    def _load_db_query(self) -> List[Dict]:
+        """Run fresh database query."""
+        log.info("Running fresh database query...")
+        
+        source_cfg = self.cfg.seg_inference.source
+        db_cfg = self.cfg.db[self.infer_cfg.db_name]
+        
+        with AgirDB.connect(
+            db_type=self.infer_cfg.db_name,
+            db_path=db_cfg.db_path,
+            table=db_cfg.get("table"),
+        ) as db:
+            query = db.builder()
+            
+            # Apply filters
+            if source_cfg.get("filters"):
+                for key, value in source_cfg.filters.items():
+                    query = query.filter(**{key: value})
+            
+            # Apply sampling
+            if source_cfg.get("sample"):
+                query = self._apply_sampling(query, source_cfg.sample)
+            
+            # Apply limit
+            if source_cfg.get("limit"):
+                query = query.limit(source_cfg.limit)
+            
+            records = query.all()
+            
+            # Convert to dict format
+            from agir_cvtoolkit.pipelines.utils.serializers import _rec_to_dict
+            return [_rec_to_dict(r) for r in records]
+    
+    @staticmethod
+    def _apply_sampling(query, sample_cfg):
+        """Apply sampling strategy to query."""
+        strategy = sample_cfg.strategy
+        
+        if strategy == "stratified":
+            return query.sample_stratified(
+                by=sample_cfg.by,
+                per_group=sample_cfg.per_group,
+                seed=sample_cfg.get("seed"),
+            )
+        elif strategy == "random":
+            return query.sample_random(sample_cfg.n)
+        elif strategy == "seeded":
+            return query.sample_seeded(sample_cfg.n, sample_cfg.get("seed", 42))
+        
+        return query
+
+
+# ============================================================================
+# Image Processing
+# ============================================================================
+
+class ImageProcessor:
+    """Handles image loading and inference."""
+    
+    def __init__(
+        self,
+        cfg: DictConfig,
+        infer_cfg: InferenceConfig,
+        model: SegModel,
+        tiled_inference: TiledInference,
+        device: torch.device,
+    ):
+        self.cfg = cfg
+        self.infer_cfg = infer_cfg
+        self.model = model
+        self.tiled_inference = tiled_inference
+        self.device = device
+    
+    def load_image(self, record: Dict) -> Optional[np.ndarray]:
+        """Load image from record based on mode."""
+        if self.infer_cfg.custom_enabled:
+            return self._load_custom_image(record)
+        
+        return load_image_from_record(
+            record,
+            self.cfg,
+            image_mode=self.infer_cfg.image_mode
+        )
+    
+    def _load_custom_image(self, record: Dict) -> Optional[np.ndarray]:
+        """Load image from custom directory."""
+        img_path = record.get("image_path")
+        if not img_path:
+            log.warning(f"No image_path in custom record")
+            return None
+        
+        img_path = Path(img_path)
+        if not img_path.exists():
+            log.warning(f"Custom image not found: {img_path}")
+            return None
+        
+        return np.array(Image.open(img_path).convert("RGB"))
+    
+    def run_inference(self, img: np.ndarray) -> tuple[np.ndarray, float]:
+        """Run tiled inference and return mask + inference time."""
+        t0 = perf_counter()
+        pred_mask = self.tiled_inference.predict(
+            img_rgb_u8=img,
+            model=self.model,
+            device=self.device,
+        )
+        inference_time_ms = int((perf_counter() - t0) * 1000)
+        return pred_mask, inference_time_ms
+    
+    def process_bboxes(
+        self,
+        img: np.ndarray,
+        bboxes: List[Dict],
+    ) -> List[tuple[str, np.ndarray, np.ndarray, float]]:
+        """Process multiple bounding boxes within an image.
+        
+        Returns:
+            List of (cutout_id, cutout_img, pred_mask, inference_time_ms)
+        """
+        results = []
+        
+        for bbox_record in bboxes:
+            cutout_id = bbox_record.get("cutout_id", "unknown")
+            bbox_xywh = bbox_record.get("bbox_xywh")
+            
+            if bbox_xywh is None:
+                continue
+            
+            # Extract bbox region
+            x = int(bbox_xywh[0] - bbox_xywh[2] / 2)
+            y = int(bbox_xywh[1] - bbox_xywh[3] / 2)
+            w = int(bbox_xywh[2])
+            h = int(bbox_xywh[3])
+            cutout_img = img[y:y+h, x:x+w]
+            
+            if cutout_img.size == 0:
+                log.warning(f"Empty cutout for bbox {cutout_id}")
+                continue
+            
+            # Run inference on cutout
+            pred_mask, inference_time_ms = self.run_inference(cutout_img)
+            results.append((cutout_id, cutout_img, pred_mask, inference_time_ms))
+        
+        return results
+
+
+# ============================================================================
+# Output Management
+# ============================================================================
+
+class OutputManager:
+    """Handles saving all outputs (masks, images, cutouts, visualizations)."""
+    
+    def __init__(
+        self,
+        cfg: DictConfig,
+        infer_cfg: InferenceConfig,
+        visualizer: Optional[SegVisualizer],
+    ):
+        self.cfg = cfg
+        self.infer_cfg = infer_cfg
+        self.paths = cfg.paths
+        self.visualizer = visualizer
+    
+    def save_outputs(
+        self,
+        record_id: str,
+        record: Dict,
+        img: np.ndarray,
+        mask: np.ndarray,
+        edge_occupancy: float,
+    ) -> Dict[str, Optional[str]]:
+        """Save all configured outputs and return paths."""
+        paths = {}
+        
+        # Save mask
+        if self.infer_cfg.save_masks:
+            paths['mask_path'] = self._save_mask(record_id, mask)
+        
+        # Save colorized mask
+        if self.infer_cfg.save_colorized and self.infer_cfg.save_masks:
+            paths['colorized_mask_path'] = self._save_colorized_mask(
+                record_id, record, paths.get('mask_path')
+            )
+        
+        # Save image
+        if self.infer_cfg.save_images:
+            paths['image_path'] = self._save_image(record_id, img)
+        
+        # Save cutout
+        if self.infer_cfg.save_cutouts:
+            paths['cutout_path'] = self._save_cutout(record_id, img, mask)
+        
+        # Save visualization
+        if self.infer_cfg.save_viz and self.visualizer:
+            area_bin = record.get("area_bin", "")
+            paths['viz_path'] = self._save_visualization(
+                record_id, record, img, mask, edge_occupancy, area_bin
+            )
+        
+        return paths
+    
+    def _save_mask(self, record_id: str, mask: np.ndarray) -> str:
+        """Save prediction mask."""
+        mask_path = Path(self.paths.masks) / f"{record_id}.png"
+        mask_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(mask, mode="L").save(mask_path)
+        log.debug(f"Saved mask: {mask_path}")
+        return str(mask_path)
+    
+    def _save_colorized_mask(
+        self,
+        record_id: str,
+        record: Dict,
+        mask_path: Optional[str],
+    ) -> Optional[str]:
+        """Save colorized mask."""
+        if not mask_path:
+            return None
+        
+        colorized_path = Path(self.paths.colorized_masks) / f"{record_id}.png"
+        rgb_value = self._get_rgb_from_record(record)
+        
+        try:
+            self._colorize_mask(
+                mask_path=Path(mask_path),
+                rgb_value=rgb_value,
+                out_path=colorized_path,
+                brightness=self.infer_cfg.colorize_brightness,
+            )
+            log.debug(f"Saved colorized mask: {colorized_path}")
+            return str(colorized_path)
+        except Exception as e:
+            log.error(f"Failed to colorize mask: {e}")
+            return None
+    
+    def _save_image(self, record_id: str, img: np.ndarray) -> str:
+        """Save source image."""
+        img_path = Path(self.paths.images) / f"{record_id}.jpg"
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(img, mode="RGB").save(
+            img_path, format="JPEG", quality=100, subsampling=0, optimize=False
+        )
+        log.debug(f"Saved image: {img_path}")
+        return str(img_path)
+    
+    def _save_cutout(
+        self,
+        record_id: str,
+        img: np.ndarray,
+        mask: np.ndarray,
+    ) -> str:
+        """Save masked cutout."""
+        cutout_path = Path(self.paths.cutouts) / f"{record_id}.png"
+        cutout_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        self._save_cutout_image(
+            img, mask, cutout_path,
+            use_rgba=self.infer_cfg.cutout_use_rgba
+        )
+        log.debug(f"Saved cutout: {cutout_path}")
+        return str(cutout_path)
+    
+    def _save_visualization(
+        self,
+        record_id: str,
+        record: Dict,
+        img: np.ndarray,
+        mask: np.ndarray,
+        edge_occupancy: float,
+        area_bin: str,
+    ) -> str:
+        """Save visualization."""
+        viz_path = Path(self.paths.plots) / f"area_{area_bin}_{record_id}_viz.png"
+        viz_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.visualizer.plot_quad(
+            record=record,
+            img_rgb_u8=img,
+            pred_mask=mask,
+            out_path=viz_path,
+            edge_occupancy=edge_occupancy,
+        )
+        log.debug(f"Saved visualization: {viz_path}")
+        return str(viz_path)
+    
+    def _get_rgb_from_record(self, record: Dict) -> Any:
+        """Extract RGB value from record."""
+        # Try primary field
+        rgb_value = record.get(self.infer_cfg.colorize_rgb_field)
+        if rgb_value:
+            return rgb_value
+        
+        # Try fallback fields
+        for field in ["category_rgb", "rgb", "category_hex"]:
+            if field in record and record.get(field):
+                log.debug(f"Using RGB from fallback field: {field}")
+                return record[field]
+        
+        # Use default fallback
+        log.warning("No RGB field found, using fallback color")
+        return [0, 255, 0]
+    
+    def _colorize_mask(
+        self,
+        mask_path: Path,
+        rgb_value: Any,
+        out_path: Path,
+        brightness: float = 6.5,
+    ) -> None:
+        """Colorize a grayscale mask."""
+        if not mask_path.exists():
+            raise FileNotFoundError(f"Mask not found: {mask_path}")
+        
+        # Load grayscale mask
+        mask_img = Image.open(mask_path).convert("L")
+        
+        # Parse RGB value
+        rgb = self._parse_rgb(rgb_value)
+        
+        # Create colored composite
+        color_img = Image.new("RGB", mask_img.size, rgb)
+        black_img = Image.new("RGB", mask_img.size, (0, 0, 0))
+        
+        # Binarize mask for compositing
+        mask_np = np.array(mask_img)
+        mask_np = np.where(mask_np > 0, 255, 0).astype(np.uint8)
+        mask_img = Image.fromarray(mask_np, mode="L")
+        
+        colorized = Image.composite(color_img, black_img, mask_img)
+        
+        # Brighten for better visualization
+        if brightness != 1.0:
+            enhancer = ImageEnhance.Brightness(colorized)
+            colorized = enhancer.enhance(brightness)
+        
+        # Save
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        colorized.save(out_path)
+    
+    def _parse_rgb(self, rgb_value: Any) -> tuple:
+        """Parse RGB value from various formats."""
+        try:
+            if isinstance(rgb_value, str):
+                rgb_value = ast.literal_eval(rgb_value)
+            
+            if isinstance(rgb_value, (list, tuple)) and len(rgb_value) == 3:
+                # Normalize to 0-255
+                if all(0.0 <= float(v) <= 1.0 for v in rgb_value):
+                    return tuple(int(float(v) * 255) for v in rgb_value)
+                else:
+                    return tuple(int(v) for v in rgb_value)
+            
+            log.warning(f"Invalid RGB format: {rgb_value}")
+            return (0, 255, 0)
+        
+        except Exception as e:
+            log.warning(f"Error parsing RGB: {e}")
+            return (0, 255, 0)
+    
+    @staticmethod
+    def _save_cutout_image(
+        img: np.ndarray,
+        mask: np.ndarray,
+        path: Path,
+        use_rgba: bool = False,
+        hard_binary: bool = False,
+        thresh: int = 128,
+    ) -> None:
+        """Save cutout image with masked pixels."""
+        assert img.ndim == 3 and img.shape[2] == 3
+        h, w = img.shape[:2]
+        assert mask.shape[:2] == (h, w)
+        
+        # Normalize mask to uint8 [0, 255]
+        alpha = OutputManager._normalize_mask(mask)
+        
+        if hard_binary:
+            alpha = (alpha >= thresh).astype(np.uint8) * 255
+        
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if use_rgba:
+            # RGBA with transparency
+            rgba = np.zeros((h, w, 4), dtype=np.uint8)
+            rgba[:, :, :3] = img
+            rgba[:, :, 3] = alpha
+            
+            # Clear RGB where fully transparent
+            fully_transparent = (alpha == 0)
+            if np.any(fully_transparent):
+                rgba[fully_transparent, :3] = 0
+            
+            Image.fromarray(rgba, mode="RGBA").save(path, format="PNG")
+        else:
+            # RGB with black background
+            masked = np.zeros_like(img, dtype=np.uint8)
+            vis = alpha > 0
+            masked[vis] = img[vis]
+            Image.fromarray(masked, mode="RGB").save(path, format="PNG")
+    
+    @staticmethod
+    def _normalize_mask(mask: np.ndarray) -> np.ndarray:
+        """Normalize mask to uint8 [0, 255]."""
+        if mask.dtype == np.bool_:
+            return mask.astype(np.uint8) * 255
+        
+        m = mask.astype(np.float32)
+        m_min, m_max = float(np.min(m)), float(np.max(m))
+        
+        if m_max <= 1.0:
+            return (m * 255.0).round().astype(np.uint8)
+        elif m_max <= 255.0:
+            if m_max > 0 and m_max < 255:
+                return (m * (255.0 / m_max)).clip(0, 255).round().astype(np.uint8)
+            else:
+                return m.clip(0, 255).round().astype(np.uint8)
+        else:
+            return ((m - m_min) / max(1e-6, (m_max - m_min)) * 255.0).round().astype(np.uint8)
+
+
+# ============================================================================
+# Main Inference Stage
+# ============================================================================
+
+class SegmentationInferenceStage:
+    """Refactored segmentation inference pipeline stage."""
     
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
-        self.seg_cfg = cfg.seg_inference
+        self.infer_cfg = InferenceConfig.from_hydra(cfg)
         self.paths = cfg.paths
         self.run_root = Path(cfg.paths.run_root)
         
-        # Setup device
+        # Setup components
         self.device = self._setup_device()
-
-        # Load model
         self.model = self._load_model()
         
-        # Setup inference components
         self.tiled_inference = TiledInference(
-            tile_h=self.seg_cfg.tile.height,
-            tile_w=self.seg_cfg.tile.width,
-            overlap=self.seg_cfg.tile.overlap,
-            pad_mode=self.seg_cfg.tile.pad_mode,
-            pad_divisor=self.seg_cfg.model.pad_divisor,
+            tile_h=cfg.seg_inference.tile.height,
+            tile_w=cfg.seg_inference.tile.width,
+            overlap=cfg.seg_inference.tile.overlap,
+            pad_mode=cfg.seg_inference.tile.pad_mode,
+            pad_divisor=cfg.seg_inference.model.pad_divisor,
         )
         
         self.post_processor = SegPostProcessor(
-            threshold=self.seg_cfg.post_process.threshold,
-            min_area=self.seg_cfg.post_process.get("min_area", 0),
-            edge_occupancy_threshold=self.seg_cfg.post_process.get("edge_occupancy_threshold"),
+            threshold=self.infer_cfg.threshold,
+            min_area=self.infer_cfg.min_area,
+            edge_occupancy_threshold=self.infer_cfg.edge_threshold,
         )
         
-        self.visualizer = SegVisualizer(
-            overlay_alpha=self.seg_cfg.visualization.overlay_alpha,
-        ) if self.seg_cfg.visualization.enabled else None
+        self.visualizer = (
+            SegVisualizer(overlay_alpha=cfg.seg_inference.visualization.overlay_alpha)
+            if cfg.seg_inference.visualization.enabled else None
+        )
         
-        # Track metrics
+        # Setup helper components
+        self.record_loader = RecordLoader(cfg, self.infer_cfg)
+        self.image_processor = ImageProcessor(
+            cfg, self.infer_cfg, self.model, self.tiled_inference, self.device
+        )
+        self.output_manager = OutputManager(cfg, self.infer_cfg, self.visualizer)
+        
+        # Metrics
         self.metrics = {
             "total_records": 0,
             "processed": 0,
@@ -83,7 +653,7 @@ class SegmentationInferenceStage:
     
     def _setup_device(self) -> torch.device:
         """Setup GPU device."""
-        gpu_cfg = self.seg_cfg.get("gpu", {})
+        gpu_cfg = self.cfg.seg_inference.get("gpu", {})
         max_gpus = gpu_cfg.get("max_gpus", 1)
         exclude_ids = gpu_cfg.get("exclude_ids", [0])
         
@@ -100,7 +670,7 @@ class SegmentationInferenceStage:
     
     def _load_model(self) -> SegModel:
         """Load segmentation model from checkpoint."""
-        model_cfg = self.seg_cfg.model
+        model_cfg = self.cfg.seg_inference.model
         
         log.info(f"Loading model from: {model_cfg.ckpt_path}")
         
@@ -115,426 +685,167 @@ class SegmentationInferenceStage:
         )
         
         model.load_checkpoint(
-            Path(model_cfg.ckpt_path),
+            self.infer_cfg.model_ckpt,
             device=self.device,
             strict=model_cfg.get("strict_load", True),
         )
         
         return model
     
-    def _get_db_records(self) -> List:
-        """Get records from database query or reuse previous query results."""
-        source_cfg = self.seg_cfg.source
-        
-        if source_cfg.type == "query_result":
-            # Read from previous query stage
-            query_path_json = self.run_root / "query" / "query.json"
-            query_path_csv = self.run_root / "query" / "query.csv"
-            if query_path_json.exists():
-                log.info(f"Loading records from previous query: {query_path_json}")
-                with open(query_path_json) as f:
-                    records = json.load(f)
-                return records
-            elif query_path_csv.exists():
-                log.info(f"Loading records from previous query: {query_path_csv}")
-                try:
-                    df = pd.read_csv(query_path_csv)
-                except pd.errors.EmptyDataError:
-                    log.info("CSV file is empty.")
-                    return []
-                if df.empty:
-                    return []
-                log.info(f"Loaded {len(df)} records from CSV")
-                # Convert float NaNs to None for JSON serialization
-                df = df.where(pd.notnull(df), None)
-                # remove rows where bbox_xywh is NaN or empty
-                df = df[df['bbox_xywh'].notna() & (df['bbox_xywh'] != '')]
-                log.info(f"Filtered down to {len(df)} records")
-                return df.to_dict(orient="records")
-            else:
-                raise FileNotFoundError("No previous query results found (query.json or query.csv)")
-        
-        elif source_cfg.type == "db_query":
-            # Run fresh query
-            log.info("Running fresh database query...")
-            db_cfg = self.cfg.db[source_cfg.db]
-            
-            with AgirDB.connect(
-                db_type=source_cfg.db,
-                db_path=db_cfg.db_path,
-                table=db_cfg.get("table"),
-            ) as db:
-                query = db.builder()
-                
-                
-                # Apply filters
-                if source_cfg.get("filters"):
-                    for key, value in source_cfg.filters.items():
-                        query = query.filter(**{key: value})
-                
-                
-                # Apply sampling
-                if source_cfg.get("sample"):
-                    sample = source_cfg.sample
-                    if sample.strategy == "stratified":
-                        query = query.sample_stratified(
-                            by=sample.by,
-                            per_group=sample.per_group,
-                            seed=sample.get("seed"),
-                        )
-                    elif sample.strategy == "random":
-                        query = query.sample_random(sample.n)
-                    elif sample.strategy == "seeded":
-                        query = query.sample_seeded(sample.n, sample.get("seed", 42))
-                
-                # Apply limit
-                if source_cfg.get("limit"):
-                    query = query.limit(source_cfg.limit)
-                
-                records = query.all()
-                
-                # Convert to dict format
-                from agir_cvtoolkit.pipelines.utils.serializers import _rec_to_dict
-                records = [_rec_to_dict(r) for r in records]
-            
-            return records
-        
-        else:
-            raise ValueError(f"Unknown source type: {source_cfg.type}")
-    
-    def _colorize_mask(
-        self, 
-        mask_path: Path, 
-        rgb_value: Any, 
-        out_path: Path,
-        brightness: float = 6.5
-    ) -> None:
-        """
-        Colorize a grayscale mask using the provided RGB value and save as RGB.
-        
-        Args:
-            mask_path: Path to the grayscale/binary mask image (nonzero = mask).
-            rgb_value: list/tuple or string like "[0.3,0.5,0.2]" or "[76,142,34]".
-                    Values in 0–1 will be scaled to 0–255.
-            out_path: Output path for the colorized mask.
-            brightness: Brightness enhancement factor (1.0 = no change, >1.0 = brighter)
-        """
-        if not mask_path.exists():
-            raise FileNotFoundError(f"Mask not found: {mask_path}")
-        
-        # Load grayscale mask
-        mask_img = Image.open(mask_path).convert("L")  # ensure 8-bit grayscale
-        
-        # Parse color safely
-        try:
-            if isinstance(rgb_value, str):
-                rgb_value = ast.literal_eval(rgb_value)
-            
-            if isinstance(rgb_value, (list, tuple)) and len(rgb_value) == 3:
-                # Check if values are normalized (0-1) or absolute (0-255)
-                if all(0.0 <= float(v) <= 1.0 for v in rgb_value):
-                    rgb = tuple(int(float(v) * 255) for v in rgb_value)
-                else:
-                    rgb = tuple(int(v) for v in rgb_value)
-            else:
-                log.warning(f"Invalid RGB value format: {rgb_value}, using fallback")
-                rgb = tuple(self.seg_cfg.output.get("colorize_fallback_rgb", [0, 255, 0]))
-        
-        except Exception as e:
-            log.warning(f"Error parsing RGB value: {e}, using fallback")
-            rgb = tuple(self.seg_cfg.output.get("colorize_fallback_rgb", [0, 255, 0]))
-        
-        # Create colored and black images
-        color_img = Image.new("RGB", mask_img.size, rgb)
-        black_img = Image.new("RGB", mask_img.size, (0, 0, 0))
-        
-        # Where mask_img > 0, take color_img; else black_img
-        mask_np = np.array(mask_img)
-        mask_np = np.where(mask_np > 0, 255, 0).astype(np.uint8)
-        mask_img = Image.fromarray(mask_np, mode="L")
-        colorized = Image.composite(color_img, black_img, mask_img)
-        
-        # Brighten the result for better visualization
-        if brightness != 1.0:
-            enhancer = ImageEnhance.Brightness(colorized)
-            colorized = enhancer.enhance(brightness)
-        
-        # Save colorized mask
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        colorized.save(out_path)
-        log.debug(f"Saved colorized mask to: {out_path}")
-
-
-    def _get_rgb_from_record(self, record: Dict) -> Any:
-        """
-        Extract RGB value from database record.
-        
-        Args:
-            record: Database record
-        
-        Returns:
-            RGB value (string, list, or tuple), or None if not found
-        """
-        rgb_field = self.seg_cfg.output.get("colorize_rgb_field", "category_rgb")
-        
-        # Try primary field
-        rgb_value = record.get(rgb_field)
-        if rgb_value:
-            return rgb_value
-        
-        # Fallback fields
-        fallback_fields = ["category_rgb", "rgb", "category_hex"]
-        for field in fallback_fields:
-            if field in record and record.get(field):
-                rgb_value = record[field]
-                log.debug(f"Using RGB from fallback field: {field}")
-                return rgb_value
-        
-        # Use configured fallback
-        log.warning(f"No RGB field found in record, using fallback color")
-        return self.seg_cfg.output.get("colorize_fallback_rgb", [0, 255, 0])
-
-
-    
     def _process_record(
         self,
         record: Dict,
         manifest: pd.DataFrame,
-        save_mask: bool,
-        save_image: bool,
-        save_cutout: bool,
-        save_viz: bool,
-        save_colorized: bool,
     ) -> Optional[Dict]:
-        """Process a single database record through the inference pipeline.
-        
-        Args:
-            record: Database record
-            save_mask: Whether to save the predicted mask
-            save_image: Whether to save the source image
-            save_cutout: Whether to save the masked cutout
-            save_viz: Whether to save visualization
-            save_colorized: Whether to save colorized mask
-        
-        Returns:
-            Manifest entry dict, or None if skipped/failed"""
+        """Process a single record through inference pipeline."""
         try:
-            # Get image_mode from config
-            image_mode = self.seg_cfg.source.get("image_mode", "cutout")
-
-            if image_mode == "full_image":
-                record_id = record.get("image_id", record.get("id", "unknown"))
-                if record_id in list(manifest['record_id'].unique()):
-                    log.info(f"Skipping record {record_id} - already processed in full_image mode")
+            # Determine record ID
+            record_id = self._get_record_id(record)
+            
+            # Check for duplicates in full_image mode
+            if self.infer_cfg.image_mode == "full_image":
+                if record_id in manifest['record_id'].unique():
+                    log.info(f"Skipping {record_id} - already processed")
                     self.metrics["skipped"] += 1
                     return None
-                else:
-                    log.info(f"Processing record {record_id} in full_image mode")
-            else:
-                record_id = record.get("cutout_id", record.get("id", "unknown"))
-
+            
             # Load image
-            img_rgb_u8 = load_image_from_record(record, self.cfg, image_mode=image_mode)
-
-            if img_rgb_u8 is None:
-                log.warning(f"Could not load image for record {record.get('cutout_id', 'unknown')}")
+            img = self.image_processor.load_image(record)
+            if img is None:
+                log.warning(f"Could not load image for {record_id}")
                 self.metrics["skipped"] += 1
                 return None
             
-            # Run inference
-            t0 = perf_counter()
-
-            if image_mode == "full_image":
-                record_id = record.get("image_id", record_id)
-                log.debug(f"Running inference on FULL IMAGE for record {record_id}...")
-            else:
-                log.debug(f"Running inference on CUTOUT for record {record_id}...")
-
-            pred_mask = self.tiled_inference.predict(
-                img_rgb_u8=img_rgb_u8,
-                model=self.model,
-                device=self.device,
-            )
-            inference_time_ms = int((perf_counter() - t0) * 1000)
+            log.info(f"Loaded image shape: {img.shape} for {record_id}")
+            
+            # Handle custom bbox mode
+            if self.infer_cfg.custom_enabled and self.infer_cfg.custom_mode == "segment_bboxes":
+                return self._process_bboxes_mode(record, img, manifest)
+            
+            # Standard inference
+            pred_mask, inference_time_ms = self.image_processor.run_inference(img)
             
             # Post-process
-            log.debug(f"Post-processing mask...")
-            pred_mask, edge_occupancy = self.post_processor.process(pred_mask, class_id=record.get("category_class_id", 27))
+            log.info("Post-processing mask...")
+            pred_mask, edge_occupancy = self.post_processor.process(
+                pred_mask,
+                class_id=record.get("category_class_id", 27)
+            )
             
-            # Determine if we should skip based on edge occupancy
-            log.debug(f"Edge occupancy: {edge_occupancy:.3f}")
-            edge_thresh = self.seg_cfg.post_process.get("edge_occupancy_threshold")
-            if edge_thresh is not None and edge_occupancy > edge_thresh:
-                log.info(
-                    f"Skipping {record.get('cutout_id', 'unknown')} - "
-                    f"edge occupancy {edge_occupancy:.3f} > {edge_thresh}"
-                )
-                self.metrics["skipped"] += 1
+            log.info(f"Edge occupancy: {edge_occupancy:.3f}")
+            
+            # Check edge occupancy threshold
+            if self._should_skip_by_edge(edge_occupancy, record_id):
                 return None
             
-            # Get output paths
-            common_name = record.get("category_common_name", record.get("common_name", "unknown"))
-            common_name = common_name.lower().replace(" ", "_")
-            area_bin = record.get("area_bin", "")
-            
             # Save outputs
-            if save_mask:
-                mask_path = Path(self.paths.masks) / f"{record_id}.png"
-                mask_path.parent.mkdir(parents=True, exist_ok=True)
-                log.debug(f"Saving mask to: {mask_path}")
-                Image.fromarray(pred_mask, mode="L").save(mask_path)
-
-            # Save colorized mask
-            colorized_path = None
-            rgb_value = None
-            if save_colorized and save_mask:
-                mask_path = Path(self.paths.masks) / f"{record_id}.png"
-                colorized_path = Path(self.paths.colorized_masks) / f"{record_id}.png"
-                
-                # Get RGB value from record
-                rgb_value = self._get_rgb_from_record(record)
-                
-                # Get brightness factor
-                brightness = self.seg_cfg.output.get("colorize_brightness", 6.5)
-                
-                # Colorize and save
-                try:
-                    self._colorize_mask(
-                        mask_path=mask_path,
-                        rgb_value=rgb_value,
-                        out_path=colorized_path,
-                        brightness=brightness
-                    )
-                    log.debug(f"Saved colorized mask: {colorized_path}")
-                except Exception as e:
-                    log.error(f"Failed to colorize mask: {e}")
-                    colorized_path = None
+            output_paths = self.output_manager.save_outputs(
+                record_id, record, img, pred_mask, edge_occupancy
+            )
             
-            if save_image:
-                img_path = Path(self.paths.images) / f"{record_id}.jpg"
-                img_path.parent.mkdir(parents=True, exist_ok=True)
-                log.debug(f"Saving image to: {img_path}")
-                # Save the high-res jpg
-                Image.fromarray(img_rgb_u8, mode="RGB").save(img_path, format="JPEG", quality=100, subsampling=0, optimize=False)
-
-            if save_cutout:
-                use_rgba = self.seg_cfg.output.get("cutout_use_rgba", False)
-                cutout_path = Path(self.paths.cutouts) / f"{record_id}.png"
-                cutout_path.parent.mkdir(parents=True, exist_ok=True)
-                log.debug(f"Saving cutout to: {cutout_path}")
-                self._save_cutout(img_rgb_u8, pred_mask, cutout_path, use_rgba=use_rgba)
-            
-            if save_viz and self.visualizer:
-                viz_path = Path(self.paths.plots) / f"area_{area_bin}_{record_id}_viz.png"
-                viz_path.parent.mkdir(parents=True, exist_ok=True)
-                log.debug(f"Saving visualization to: {viz_path}")
-                self.visualizer.plot_quad(
-                    record=record,
-                    img_rgb_u8=img_rgb_u8,
-                    pred_mask=pred_mask,
-                    out_path=viz_path,
-                    edge_occupancy=edge_occupancy,
-                )
-            
+            # Update metrics
             self.metrics["processed"] += 1
             self.metrics["total_inference_time_ms"] += inference_time_ms
             
             # Build manifest entry
-            manifest_entry = {
-                "record_id": record_id,
-                "image_mode": image_mode,  # Track which mode was used
-                "common_name": common_name,
-                "area_bin": area_bin,
-                "image_path": str(Path(self.paths.images) / f"{record_id}.jpg") if save_image else None,
-                "mask_path": str(Path(self.paths.masks) / f"{record_id}.png") if save_mask else None,
-                "colorized_mask_path": str(colorized_path) if colorized_path else None,
-                "cutout_path": str(Path(self.paths.cutouts) / f"{record_id}.png") if save_cutout else None,
-                "viz_path": str(Path(self.paths.plots) / f"{record_id}_viz.png") if save_viz else None,
-                "inference_time_ms": inference_time_ms,
-                "edge_occupancy": float(edge_occupancy),
-                "image_shape": list(img_rgb_u8.shape),
-                "mask_shape": list(pred_mask.shape),
-                "rgb_value": str(rgb_value) if save_colorized else None,
-            }
-            self.metrics["processed"] += 1
-            self.metrics["total_inference_time_ms"] += inference_time_ms
-            
-            return manifest_entry
+            return self._build_manifest_entry(
+                record_id, record, img, pred_mask,
+                edge_occupancy, inference_time_ms, output_paths
+            )
         
         except Exception as e:
-            log.error(f"Failed to process record {record_id}: {e}")
+            log.error(f"Failed to process record {record.get('id', 'unknown')}: {e}")
             self.metrics["failed"] += 1
             return None
     
-    def _save_cutout(
+    def _process_bboxes_mode(
         self,
-        img_rgb_u8: np.ndarray,
-        pred_mask: np.ndarray,
-        cutout_path: Path,
-        use_rgba: bool = False,
-        hard_binary: bool = False,   # set True if you want crisp 0/255 edge
-        thresh: int = 128,           # used only when hard_binary=True
-    ) -> None:
-        """
-        Save a cutout image with masked pixels.
-
-        Args:
-            img_rgb_u8: Source image (H, W, 3) as uint8
-            pred_mask: Mask (H, W) as uint8/float/bool; may be soft or binary
-            cutout_path: Output path for cutout
-            use_rgba: If True, save as RGBA (transparent background).
-                    If False, save as RGB with black background.
-            hard_binary: If True, binarize the mask at 'thresh' before saving.
-        """
-        # --- Validate inputs ---
-        assert img_rgb_u8.ndim == 3 and img_rgb_u8.shape[2] == 3, "img_rgb_u8 must be HxWx3 RGB"
-        h, w = img_rgb_u8.shape[:2]
-        assert pred_mask.shape[:2] == (h, w), "pred_mask must match image size"
-
-        # --- Normalize mask to uint8 [0, 255] ---
-        m = pred_mask
-        if m.dtype == np.bool_:
-            alpha = m.astype(np.uint8) * 255
+        record: Dict,
+        img: np.ndarray,
+        manifest: pd.DataFrame,
+    ) -> Optional[Dict]:
+        """Process record in bbox segmentation mode."""
+        record_id = record.get("image_id", record.get("id", "unknown"))
+        log.info(f"Running bbox segmentation for {record_id}...")
+        
+        bboxes = record.get("xywh_detections", [])
+        if not bboxes:
+            log.warning(f"No bounding boxes found for {record_id}")
+            self.metrics["skipped"] += 1
+            return None
+        
+        # Process each bbox
+        bbox_results = self.image_processor.process_bboxes(img, bboxes)
+        
+        for cutout_id, cutout_img, pred_mask, inference_time_ms in bbox_results:
+            # Post-process
+            pred_mask, edge_occupancy = self.post_processor.process(
+                pred_mask,
+                class_id=record.get("category_class_id", 27)
+            )
+            
+            if self._should_skip_by_edge(edge_occupancy, cutout_id):
+                continue
+            
+            # Save outputs for this bbox
+            output_paths = self.output_manager.save_outputs(
+                cutout_id, record, cutout_img, pred_mask, edge_occupancy
+            )
+            
+            self.metrics["processed"] += 1
+            self.metrics["total_inference_time_ms"] += inference_time_ms
+        
+        # Return manifest entry for parent record
+        return self._build_manifest_entry(
+            record_id, record, img, None, 0.0, 0, {}
+        )
+    
+    def _get_record_id(self, record: Dict) -> str:
+        """Extract appropriate record ID based on mode."""
+        if self.infer_cfg.image_mode == "full_image":
+            return record.get("image_id", record.get("id", "unknown"))
         else:
-            m = m.astype(np.float32)  # safe cast
-            m_min, m_max = float(np.min(m)), float(np.max(m))
-            if m_max <= 1.0:          # e.g., 0/1 or [0,1]
-                alpha = (m * 255.0).round().astype(np.uint8)
-            elif m_max <= 255.0:      # already looks like 0..255 (possibly 10..40 etc.)
-                # If it's "low range" (e.g., 0..40), scale up to full 0..255 so it isn't faded.
-                # Keep zeros at 0 to preserve transparency.
-                if m_max > 0 and m_max < 255:
-                    alpha = (m * (255.0 / m_max)).clip(0, 255).round().astype(np.uint8)
-                else:
-                    alpha = m.clip(0, 255).round().astype(np.uint8)
-            else:
-                # Unexpected scale; normalize to [0,255]
-                alpha = ((m - m_min) / max(1e-6, (m_max - m_min)) * 255.0).round().astype(np.uint8)
-
-        if hard_binary:
-            alpha = (alpha >= thresh).astype(np.uint8) * 255
-
-        cutout_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if use_rgba:
-            # RGBA with STRAIGHT (un-premultiplied) alpha
-            rgba = np.zeros((h, w, 4), dtype=np.uint8)
-            rgba[:, :, :3] = img_rgb_u8
-            rgba[:, :, 3] = alpha
-
-            # Optional: wipe RGB where fully transparent to avoid halos in some viewers
-            fully_transparent = (alpha == 0)
-            if np.any(fully_transparent):
-                rgba[fully_transparent, :3] = 0
-
-            Image.fromarray(rgba, mode="RGBA").save(cutout_path, format="PNG")
-
-        else:
-            # RGB with black background (no alpha)
-            masked = np.zeros_like(img_rgb_u8, dtype=np.uint8)
-            vis = alpha > 0
-            masked[vis] = img_rgb_u8[vis]
-            Image.fromarray(masked, mode="RGB").save(cutout_path, format="PNG")
+            return record.get("cutout_id", record.get("id", "unknown"))
+    
+    def _should_skip_by_edge(self, edge_occupancy: float, record_id: str) -> bool:
+        """Check if record should be skipped based on edge occupancy."""
+        threshold = self.infer_cfg.edge_threshold
+        if threshold is not None and edge_occupancy > threshold:
+            log.info(f"Skipping {record_id} - edge occupancy {edge_occupancy:.3f} > {threshold}")
+            self.metrics["skipped"] += 1
+            return True
+        return False
+    
+    def _build_manifest_entry(
+        self,
+        record_id: str,
+        record: Dict,
+        img: np.ndarray,
+        pred_mask: Optional[np.ndarray],
+        edge_occupancy: float,
+        inference_time_ms: int,
+        output_paths: Dict[str, Optional[str]],
+    ) -> Dict:
+        """Build manifest entry for a processed record."""
+        common_name = record.get("category_common_name", record.get("common_name", "unknown"))
+        common_name = common_name.lower().replace(" ", "_")
+        area_bin = record.get("area_bin", "")
+        
+        return {
+            "record_id": record_id,
+            "image_mode": self.infer_cfg.image_mode,
+            "common_name": common_name,
+            "area_bin": area_bin,
+            "image_path": output_paths.get("image_path"),
+            "mask_path": output_paths.get("mask_path"),
+            "colorized_mask_path": output_paths.get("colorized_mask_path"),
+            "cutout_path": output_paths.get("cutout_path"),
+            "viz_path": output_paths.get("viz_path"),
+            "inference_time_ms": inference_time_ms,
+            "edge_occupancy": float(edge_occupancy),
+            "image_shape": list(img.shape) if img is not None else None,
+            "mask_shape": list(pred_mask.shape) if pred_mask is not None else None,
+        }
     
     def run(self) -> None:
         """Run the segmentation inference pipeline."""
@@ -543,80 +854,62 @@ class SegmentationInferenceStage:
         log.info("=" * 80)
         
         # Load records
-        records = self._get_db_records()
+        records = self.record_loader.load_records()
+        
         if not records:
-            log.warning("No records to process.")
+            log.warning("No records to process")
             return
         
         self.metrics["total_records"] = len(records)
         log.info(f"Processing {len(records)} records...")
         
-        # Output configuration
-        output_cfg = self.seg_cfg.output
-        save_mask = output_cfg.get("save_masks", True)
-        save_image = output_cfg.get("save_images", False)
-        save_cutout = output_cfg.get("save_cutouts", True)
-        save_viz = output_cfg.get("save_viz", False)
-        save_colorized = output_cfg.get("save_colorized_masks", False)
-        
-        manifest_path = Path(self.paths.manifest_path)
-        manifest_path = manifest_path.with_suffix('.csv')  # Ensure .csv extension
-        
-        # Initialize CSV with header
+        # Initialize manifest CSV
+        manifest_path = Path(self.paths.manifest_path).with_suffix('.csv')
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        
         df = pd.DataFrame(columns=[
-            'record_id',
-            'common_name',
-            'edge_occupancy',
-            'inference_time_ms',
-            'mask_path',
-            'image_path',
-            'plot_path',
+            'record_id', 'common_name', 'edge_occupancy',
+            'inference_time_ms', 'mask_path', 'image_path', 'plot_path',
         ])
         df.to_csv(manifest_path, index=False)
-
-        # Metrics update interval
-        metrics_update_interval = 10
+        
+        # Process records with progress tracking
         metrics_path = Path(self.paths.metrics_path)
-        result : Dict[str, Any] = {}
-        # Process records and write to CSV in real-time
+        metrics_update_interval = 10
+        
         for idx, record in enumerate(tqdm(records, desc="Inference"), 1):
-            result = self._process_record(
-                record=record,
-                manifest=df,
-                save_mask=save_mask,
-                save_image=save_image,
-                save_cutout=save_cutout,
-                save_viz=save_viz,
-                save_colorized=save_colorized,
-            )
+            result = self._process_record(record, df)
             
             if result:
-                # Create a one-row DataFrame for the result and append to CSV without using deprecated .append
+                # Append to CSV
                 new_row = pd.DataFrame([result])
                 new_row.to_csv(manifest_path, mode='a', header=False, index=False)
-                # Update the in-memory dataframe using pd.concat
                 df = pd.concat([df, new_row], ignore_index=True)
-
-            # Update metrics periodically
+            
+            # Periodic metrics update
             if idx % metrics_update_interval == 0:
-                self.metrics["avg_inference_time_ms"] = (
-                    self.metrics["total_inference_time_ms"] / self.metrics["processed"]
-                    if self.metrics["processed"] > 0 else 0
-                )
-                with open(metrics_path, "w") as f:
-                    json.dump(self.metrics, f, indent=2)
+                self._update_metrics(metrics_path)
         
         # Final metrics update
-        self.metrics["avg_inference_time_ms"] = (
-            self.metrics["total_inference_time_ms"] / self.metrics["processed"]
-            if self.metrics["processed"] > 0 else 0
-        )
+        self._update_metrics(metrics_path)
+        
+        # Print summary
+        self._print_summary(manifest_path, metrics_path)
+    
+    def _update_metrics(self, metrics_path: Path) -> None:
+        """Update and save metrics."""
+        if self.metrics["processed"] > 0:
+            self.metrics["avg_inference_time_ms"] = (
+                self.metrics["total_inference_time_ms"] / self.metrics["processed"]
+            )
+        else:
+            self.metrics["avg_inference_time_ms"] = 0
         
         with open(metrics_path, "w") as f:
             json.dump(self.metrics, f, indent=2)
-        
-        # Summary
+    
+    def _print_summary(self, manifest_path: Path, metrics_path: Path) -> None:
+        """Print pipeline summary."""
         log.info("=" * 80)
         log.info("Segmentation Inference Complete")
         log.info("=" * 80)
@@ -628,7 +921,4 @@ class SegmentationInferenceStage:
         log.info(f"Results saved to: {self.paths.run_root}")
         log.info(f"Manifest: {manifest_path}")
         log.info(f"Metrics: {metrics_path}")
-        # Get log path from logging object
-        log_path = Path(self.paths.logs) / Path(logging.getLogger().handlers[1].baseFilename).name
-        log.info(f"Log: {log_path}")
         log.info("=" * 80)

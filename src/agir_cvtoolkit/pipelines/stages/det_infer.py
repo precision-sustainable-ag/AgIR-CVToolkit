@@ -241,6 +241,10 @@ class YOLOMultiscaleDetector:
         self.query_spec = load_query_spec(Path(cfg.paths.query) / "query_spec.json")
         # DB type
         self.db_type = self.query_spec.get("database", {}).get("type", "semif")
+
+        # Source
+        self.custom = det_cfg.get("source", {}).get("custom", {}).get("enabled", {})
+        self.custom_source = det_cfg.get("source", {}).get("custom", {}).get("image_dir", None)
         
         # Model configuration
         model_cfg = det_cfg.get("model", {})
@@ -325,16 +329,22 @@ class YOLOMultiscaleDetector:
                 f"Query results not found: {query_csv}. Run 'agir-cvtoolkit query' first."
             )
         
-        df = pd.read_csv(query_csv)
+        if self.custom:
+            src_dir = Path(self.custom_source)
+            if not src_dir.exists() or not src_dir.is_dir():
+                raise FileNotFoundError(f"Custom source directory not found: {src_dir}")
+            log.info(f"Using custom source directory for images: {self.custom_source}")
+            image_paths = sorted(src_dir.glob("*.jpg")) + sorted(src_dir.glob("*.JPG"))
+        else:
+            df = pd.read_csv(query_csv)
+            if "image_path" not in df.columns:
+                raise ValueError("Query results must contain 'image_path' column")    
+            image_src = self._resolve_image_src(self.cfg)
+            log.info(f"Resolved image source directory: {image_src}")
+            df['full_image_path'] = image_src / (df['ncsu_nfs'] + "/" + df['image_path'])
+            image_paths = df["full_image_path"].tolist()
+            image_paths = [str(p) for p in image_paths]
         
-        if "image_path" not in df.columns:
-            raise ValueError("Query results must contain 'image_path' column")
-        
-        image_src = self._resolve_image_src(self.cfg)
-        log.info(f"Resolved image source directory: {image_src}")
-        df['full_image_path'] = image_src / (df['ncsu_nfs'] + "/" + df['image_path'])
-        image_paths = df["full_image_path"].tolist()
-        image_paths = [str(p) for p in image_paths]
         log.info(f"Processing {len(image_paths)} images with multiscale detection")
         source, stream, screenshot, from_img, in_memory, tensor = check_source(image_paths)
         source_type = source.source_type if in_memory else SourceTypes(stream, screenshot, from_img, tensor)
@@ -352,7 +362,10 @@ class YOLOMultiscaleDetector:
             im0 = im0s_list[0]
 
             # get df row from image path stem
-            df_row = df[df['image_path'].str.contains(path.stem)].iloc[0]
+            df_row = None
+            if not self.custom:
+                df_row = df[df['image_path'].str.contains(path.stem)].iloc[0] 
+            
             log.info(f"Processing image: {path}")
             if not path.exists():
                 log.warning(f"Image not found: {path}")
@@ -429,15 +442,25 @@ class YOLOMultiscaleDetector:
             
             # Collect results
             if final_results[0].boxes.shape[0] > 0:
-                xywh = final_results[0].boxes.xywh.detach().cpu().numpy().tolist()
-                xywhn = final_results[0].boxes.xywhn.detach().cpu().numpy().tolist()
-                conf = final_results[0].boxes.conf.detach().cpu().numpy().tolist()
+                detection_records = []
+                obj_path = final_results[0].path
+                for i, bbox_obj in enumerate(final_results[0].boxes.cpu()):
+                    
+                    record = {
+                        "cutout_id": f"{path.stem}_{i}",
+                        "bbox_xywh": bbox_obj.xywh.tolist()[0],
+                        "bbox_xyxy": bbox_obj.xyxy.tolist()[0],
+                        "bbox_xywhn": bbox_obj.xywhn.tolist()[0],
+                        "confidence": bbox_obj.conf.item(),
+                    }
+                    detection_records.append(record)
+
                 results_list.append({
                     "image_id": path.stem,
-                    "image_path": str(path),
-                    "xywh_detections": [list(x) for x in xywh],
-                    "xywhn_detections": [list(x) for x in xywhn],
-                    "confidences": conf,
+                    "image_path": str(path) if str(path) == obj_path else None,
+                    "xywh_detections": detection_records,
+                    # "xywhn_detections": [list(x) for x in xywhn],
+                    # "confidences": conf,
                     "num_detections": final_results[0].boxes.shape[0],
                 })
                 self._save_results(results_list)
@@ -475,7 +498,10 @@ class YOLOMultiscaleDetector:
                 verbose=False,
                 device=self.device,
             )[0]
-            
+            # plot for debugging
+            # log.info(f"Scale {s:.2f} (imgsz={imgsz}): {len(r.boxes) if r.boxes is not None else 0} boxes")
+            # r.save_crop(save_dir=".", file_name=f"debug_scale_{s:.2f}.jpg")
+            # r.plot(filename=f"debug_scale_{s:.2f}_plot.jpg")
             if r.boxes is None or len(r.boxes) == 0:
                 continue
             
@@ -507,8 +533,8 @@ class YOLOMultiscaleDetector:
                 line_width=self.line_width,
                 font_size=self.font_size,
             )
-            area_bin = df_row.get("estimated_area_bin", "unknown")
-            common_name = df_row.get("category_common_name", "unknown")
+            area_bin = df_row.get("estimated_area_bin", "unknown") if df_row is not None else "unknown"
+            common_name = df_row.get("category_common_name", "unknown") if df_row is not None else "unknown"
             if pd.isna(common_name) or common_name.strip() == "":
                 common_name = "unknown"
             if pd.isna(area_bin) or area_bin.strip() == "":

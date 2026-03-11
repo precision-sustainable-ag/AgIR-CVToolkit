@@ -10,7 +10,7 @@ checkpoints/
 experimental/
 run.sh
 scripts/exports/
-
+tempdata/
 # Pages
 docs/_build/
 _site/

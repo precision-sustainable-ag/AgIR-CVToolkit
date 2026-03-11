@@ -4,9 +4,16 @@
 source:
   type: "query_result"  # "query_result" | "db_query"
   db: "semif"       # "semif" | "field"
+  custom: 
+    enabled: true
+    mode: segment_bboxes  # "segment_bboxes" (segment only within bbox detections) | "segment_images" (segment entire image)
+    image_dir: #/home/mkutuga/svs-raw-api/data/jpgs/MD_2025-10-14  # Custom directory if applicable
+    label_json_path: #/home/mkutuga/AgIR-CVToolkit/outputs/runs/test/001/plots/detections.json
+
+  
   
   # Specify whether to use full images or cutouts
-  image_mode: "full_image"  # "cutout" | "full_image"
+  image_mode: "cutout"  # "cutout" | "full_image"
   # - "cutout": Use cropout_path or crop from image_path using bbox (default behavior)
   # - "full_image": Always use the full image_path, ignore bbox and cropout_path
   
@@ -41,7 +48,7 @@ model:
   strict_load: true
   
   # Checkpoint path (REQUIRED - override via CLI)
-  ckpt_path: /home/yourusername/Field-SegmentationTraining/projects/PSA_15164_393_unets/train_2025-10-10_08_36_13/checkpoints/epoch=47-step=37200-val_loss=0.00.ckpt
+  ckpt_path: /home/mkutuga/Field-SegmentationTraining/projects/PSA_15164_393_unets/train_2025-10-10_08_36_13/checkpoints/epoch=47-step=37200-val_loss=0.00.ckpt
   # ckpt_path: /home/yourusername/Field-SegmentationTraining/projects/PSA_15164_393_unets/train_2025-10-10_08_36_13/checkpoints/epoch=47-step=37200-val_loss=0.00.ckpt # mit_b4
   
   # Normalization parameters
@@ -66,10 +73,10 @@ post_process:
 output:
   save_masks: false
   save_images: false
-  save_cutouts: false
-  save_viz: false
+  save_cutouts: true
+  save_viz: true
   
-  cutout_use_rgba: false  # Use RGBA for cutouts if saving cutouts
+  cutout_use_rgba: true  # Use RGBA for cutouts if saving cutouts
   
   # Colorization options
   save_colorized_masks: false  # Save RGB colorized masks
