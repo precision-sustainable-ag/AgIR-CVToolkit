@@ -127,6 +127,12 @@ Browse the sections below to learn about each database.
       <img src="assets/images/sponsors/USDA_logo.png" alt="USDA">
     </a>
   </div>
+
+  <div class="sponsor-logo-item">
+    <a href="#" title="United Soybean Board">
+      <img src="assets/images/sponsors/20191007_USB_Full_Color_Logo_CMYK.ai.svg" alt="USB">
+    </a>
+  </div>
   
   <div class="sponsor-logo-item">
     <a href="#" title="Cotton Inc">
@@ -140,21 +146,15 @@ Browse the sections below to learn about each database.
     </a>
   </div>
 
-  <div class="sponsor-logo-item sponsor-logo-wide">
-    <a href="#" title="National Institute of Food and Agriculture">
-      <img src="assets/images/sponsors/nifa-color-lockup.svg" alt="NIFA">
-    </a>
-  </div>
-
   <div class="sponsor-logo-item">
     <a href="#" title="National Resource Convervation Service">
       <img src="assets/images/sponsors/usfws-usda-nrcs-logohighresjpg.jpeg" alt="NRCS">
     </a>
   </div>
 
-  <div class="sponsor-logo-item">
-    <a href="#" title="United Soybean Board">
-      <img src="assets/images/sponsors/20191007_USB_Full_Color_Logo_CMYK.ai.svg" alt="USB">
+  <div class="sponsor-logo-item sponsor-logo-wide">
+    <a href="#" title="National Institute of Food and Agriculture">
+      <img src="assets/images/sponsors/nifa-color-lockup.svg" alt="NIFA">
     </a>
   </div>
 
