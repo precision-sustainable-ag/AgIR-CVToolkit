@@ -31,7 +31,7 @@ This repository is a product of the **Digital Agricultural Systems Hub**, a coll
   
   <div class="sponsor-logo-item primary-sponsor">
     <a href="https://digitalagsystemshub.org" title="Digital Agricultural Systems Hub">
-      <img src="assets/images/logos/DASH LOGO 2024_2.ai.svg" alt="Digital Agricultural Systems Hub">
+      <img src="assets/images/logos/DASH LOGO full no mark NO BG.png" alt="Digital Agricultural Systems Hub">
     </a>
   </div>
   
@@ -123,31 +123,31 @@ Browse the sections below to learn about each database.
 <div class="sponsors-logo-grid">
   
   <div class="sponsor-logo-item">
-    <a href="https://www.usda.gov/" title="USDA">
+    <a href="https://www.usda.gov/" title="USDA", target="_blank" rel="noopener">
       <img src="assets/images/sponsors/USDA_logo.png" alt="USDA">
     </a>
   </div>
 
   <div class="sponsor-logo-item">
-    <a href="https://unitedsoybean.org/" title="United Soybean Board">
+    <a href="https://unitedsoybean.org/" title="United Soybean Board", target="_blank" rel="noopener">
       <img src="assets/images/sponsors/20191007_USB_Full_Color_Logo_CMYK.ai.svg" alt="USB">
     </a>
   </div>
   
   <div class="sponsor-logo-item">
-    <a href="https://www.cottoninc.com/" title="Cotton Inc">
+    <a href="https://www.cottoninc.com/" title="Cotton Inc", target="_blank" rel="noopener">
       <img src="assets/images/sponsors/cottoninc-logo.png" alt="Cotton Inc">
     </a>
   </div>
   
   <div class="sponsor-logo-item">
-    <a href="https://americansugarbeet.org/" title="American Sugarbeets Growers Associations">
+    <a href="https://americansugarbeet.org/" title="American Sugarbeets Growers Associations", target="_blank" rel="noopener">
       <img src="assets/images/sponsors/American Sugarbeets Growers Associations.png" alt="American Sugarbeets Growers Associations">
     </a>
   </div>
 
   <div class="sponsor-logo-item">
-    <a href="https://www.nrcs.usda.gov/" title="National Resource Convervation Service">
+    <a href="https://www.nrcs.usda.gov/" title="National Resource Convervation Service", target="_blank" rel="noopener">
       <img src="assets/images/sponsors/usfws-usda-nrcs-logohighresjpg.jpeg" alt="NRCS">
     </a>
   </div>
