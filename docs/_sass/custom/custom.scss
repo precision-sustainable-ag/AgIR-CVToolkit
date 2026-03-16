@@ -373,10 +373,32 @@ th {
 // ==========================================
 
 
-.primary-sponsor img {
-  max-width: 350px;   /* increase size */
+.sponsor-logo-item.primary-sponsor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
+  max-width: 900px;
+  min-height: 180px;
+  padding: 2rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+}
+
+.sponsor-logo-item.primary-sponsor a {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+.sponsor-logo-item.primary-sponsor img {
+  display: block;
+  width: auto;
+  max-width: 700px;
+  max-height: none;
   height: auto;
+  margin: 0 auto;
 }
 
 // ==========================================
