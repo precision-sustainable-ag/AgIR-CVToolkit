@@ -136,7 +136,25 @@ Browse the sections below to learn about each database.
   
   <div class="sponsor-logo-item">
     <a href="#" title="American Sugarbeets Growers Associations">
-      <img src="assets/images/sponsors/American Sugarbeets Growers Associations.png" alt="Organization 3">
+      <img src="assets/images/sponsors/American Sugarbeets Growers Associations.png" alt="American Sugarbeets Growers Associations">
+    </a>
+  </div>
+
+  <div class="sponsor-logo-item">
+    <a href="#" title="National Institute of Food and Agriculture">
+      <img src="assets/images/sponsors/nifa-color-lockup.svg" alt="NIFA">
+    </a>
+  </div>
+
+  <div class="sponsor-logo-item">
+    <a href="#" title="National Resource Convervation Service">
+      <img src="assets/images/sponsors/usfws-usda-nrcs-logohighresjpg.jpeg" alt="NRCS">
+    </a>
+  </div>
+
+  <div class="sponsor-logo-item">
+    <a href="#" title="United Soybean Board">
+      <img src="assets/images/sponsors/20191007_USB_Full_Color_Logo_CMYK.ai.svg" alt="USB">
     </a>
   </div>
 
