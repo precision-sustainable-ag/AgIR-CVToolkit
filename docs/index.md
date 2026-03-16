@@ -123,7 +123,7 @@ Browse the sections below to learn about each database.
 <div class="sponsors-logo-grid">
   
   <div class="sponsor-logo-item">
-    <a href="https://www.usda.gov/" title="USDA", target="_blank" rel="noopener">
+    <a href="https://www.usda.gov/" title="USDA" target="_blank" rel="noopener">
       <img src="assets/images/sponsors/USDA_logo.png" alt="USDA">
     </a>
   </div>
