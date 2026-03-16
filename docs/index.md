@@ -140,7 +140,7 @@ Browse the sections below to learn about each database.
     </a>
   </div>
 
-  <div class="sponsor-logo-item">
+  <div class="sponsor-logo-item sponsor-logo-wide">
     <a href="#" title="National Institute of Food and Agriculture">
       <img src="assets/images/sponsors/nifa-color-lockup.svg" alt="NIFA">
     </a>
