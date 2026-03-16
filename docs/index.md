@@ -129,31 +129,31 @@ Browse the sections below to learn about each database.
   </div>
 
   <div class="sponsor-logo-item">
-    <a href="https://unitedsoybean.org/" title="United Soybean Board", target="_blank" rel="noopener">
+    <a href="https://unitedsoybean.org/" title="United Soybean Board" target="_blank" rel="noopener">
       <img src="assets/images/sponsors/20191007_USB_Full_Color_Logo_CMYK.ai.svg" alt="USB">
     </a>
   </div>
   
   <div class="sponsor-logo-item">
-    <a href="https://www.cottoninc.com/" title="Cotton Inc", target="_blank" rel="noopener">
+    <a href="https://www.cottoninc.com/" title="Cotton Inc" target="_blank" rel="noopener">
       <img src="assets/images/sponsors/cottoninc-logo.png" alt="Cotton Inc">
     </a>
   </div>
   
   <div class="sponsor-logo-item">
-    <a href="https://americansugarbeet.org/" title="American Sugarbeets Growers Associations", target="_blank" rel="noopener">
+    <a href="https://americansugarbeet.org/" title="American Sugarbeets Growers Associations" target="_blank" rel="noopener">
       <img src="assets/images/sponsors/American Sugarbeets Growers Associations.png" alt="American Sugarbeets Growers Associations">
     </a>
   </div>
 
   <div class="sponsor-logo-item">
-    <a href="https://www.nrcs.usda.gov/" title="National Resource Convervation Service", target="_blank" rel="noopener">
+    <a href="https://www.nrcs.usda.gov/" title="National Resource Convervation Service" target="_blank" rel="noopener">
       <img src="assets/images/sponsors/usfws-usda-nrcs-logohighresjpg.jpeg" alt="NRCS">
     </a>
   </div>
 
   <div class="sponsor-logo-item sponsor-logo-wide">
-    <a href="https://www.nifa.usda.gov/" title="National Institute of Food and Agriculture">
+    <a href="https://www.nifa.usda.gov/" title="National Institute of Food and Agriculture" target="_blank" rel="noopener">
       <img src="assets/images/sponsors/nifa-color-lockup.svg" alt="NIFA">
     </a>
   </div>
