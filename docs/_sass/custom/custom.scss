@@ -482,6 +482,7 @@ th {
 // ==========================================
 
 .sponsor-logo-item.sponsor-logo-wide {
+  border: 2px solid red;
   grid-column: 1 / -1;
   max-width: 800px;
   min-height: 140px;
@@ -503,6 +504,8 @@ th {
   height: auto;
   object-fit: contain;
   opacity: 1;
+  border: 2px solid blue;
+  background: yellow;
 }
 
 
