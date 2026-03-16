@@ -426,8 +426,8 @@ th {
 }
 
 .sponsor-logo-item.sponsor-logo-wide {
-  min-height: 140px;
-  padding: 1.5rem 2rem;
+  grid-column: 1 / -1;
+  max-width: 700px;
 }
 
 .sponsor-logo-item.sponsor-logo-wide img {
