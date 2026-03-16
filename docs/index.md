@@ -31,7 +31,7 @@ This repository is a product of the **Digital Agricultural Systems Hub**, a coll
   
   <div class="sponsor-logo-item primary-sponsor">
     <a href="https://digitalagsystemshub.org" title="Digital Agricultural Systems Hub">
-      <img src="assets/images/logos/DASH BW LOGO full no mark NO BG.png" alt="Digital Agricultural Systems Hub">
+      <img src="assets/images/logos/DASH LOGO 2024_2.ai.svg" alt="Digital Agricultural Systems Hub">
     </a>
   </div>
   
