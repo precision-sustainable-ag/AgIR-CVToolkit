@@ -374,7 +374,9 @@ th {
 
 
 .primary-sponsor img {
-  max-height: 200px;
+  max-width: 350px;   /* increase size */
+  width: 100%;
+  height: auto;
 }
 
 // ==========================================
