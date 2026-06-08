@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Setup & Query Guide
+title: Scinet Usage
 parent: Access & Query
 nav_order: 3
 ---
