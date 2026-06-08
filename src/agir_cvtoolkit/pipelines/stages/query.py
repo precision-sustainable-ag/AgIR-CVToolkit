@@ -222,7 +222,9 @@ def run_query(
     # Output results
     if out == "json":
         save_records_to_json(result_path, recs)
+        log.info(f"JSON saved to {result_path}")
     elif out in ("csv", "parquet"):
         save_records_as_dataframe(projection, out, result_path, recs)
+        log.info(f"{out.upper()} saved to {result_path}")
     
     agir_db.close()
