@@ -1,9 +1,8 @@
 ---
 layout: default
 title: Setup & Query Guide
-parent: SciNet Usage
-grand_parent: Access & Query
-nav_order: 1
+parent: Access & Query
+nav_order: 3
 ---
 
 # SciNet Setup & Query Guide
