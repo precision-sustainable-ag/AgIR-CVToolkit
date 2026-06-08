@@ -1,0 +1,40 @@
+# src/agir_cvtoolkit/conf/globus/default.yaml
+#
+# Globus transfer configuration for AgIR-CVToolkit.
+# Source is always Juno LTS. Destination is selected with --dst on the CLI.
+
+# ---- Source endpoint (always Juno) ----
+juno_endpoint: # <juno endpoint>   # SCINet-Juno (LTS)
+src_root: "/LTS/project/dash_agir/"
+
+# ---- Named destinations ----
+# Select one at runtime with:  agir-cv scinet-transfer --dst ceres
+# Add new destinations here without touching any Python code.
+destinations:
+  ceres:
+    endpoint: # <ceres endpoint>   # SCINet-Ceres
+    dst_root: "/90daydata/dash_agir/tmp/"
+  atlas:
+    endpoint: # <atlas endpoint>   # SCINet-Atlas
+    dst_root: "/90daydata/dash_agir/tmp/"
+
+# ---- Default destination (used when --dst is not passed) ----
+default_dst: "ceres"
+
+# ---- Transfer options ----
+transfer:
+  # globus transfer sync-level: one of checksum | mtime | exists | size
+  sync_level: "checksum"
+  label_prefix: "agir-cv scinet-transfer"
+  # If true, block until the task reaches SUCCEEDED/FAILED (or timeout).
+  wait: false
+  poll_interval_s: 10
+  timeout_s: 300
+
+# ---- Path column heuristics ----
+# Columns inspected (in order) when building per-record source paths.
+path_columns:
+  - cropout_path
+  - cutout_path
+  - cutout_mask_path
+  - cutout_json_path

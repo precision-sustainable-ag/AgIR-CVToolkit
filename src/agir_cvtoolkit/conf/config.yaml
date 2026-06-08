@@ -8,6 +8,7 @@ defaults:
   - augment: default
   - preprocess: default
   - train: default
+  - globus: default
   - _self_                     # Ensures overriding behavior
 
 project:
