@@ -246,5 +246,131 @@ def train(
         f"run_root: {cfg['paths']['run_root']}"
     )
 
+@app.command("scinet-transfer")
+def scinet_transfer(
+    config: str = typer.Option("config", help="Hydra config name (without .yaml)"),
+    override: List[str] = typer.Option(
+        None, "--override", "-o", help="Hydra override (repeatable)"
+    ),
+    dst: Optional[str] = typer.Option(
+        None,
+        "--dst",
+        help=(
+            "Destination name as defined in globus.destinations config "
+            "(e.g. 'ceres' or 'atlas'). Defaults to globus.default_dst."
+        ),
+    ),
+    src_root: Optional[str] = typer.Option(
+        None,
+        "--src-root",
+        help="Override source root path on Juno (globus.src_root in config).",
+    ),
+    wait: bool = typer.Option(
+        False,
+        "--wait/--no-wait",
+        help="Block until the Globus task completes (or times out). Only meaningful with --submit.",
+    ),
+    submit: bool = typer.Option(
+        False,
+        "--submit",
+        help="Actually submit the transfer to Globus. Without this flag the command is a dry-run.",
+    ),
+):
+    """
+    Transfer files identified by a prior 'query' run from Juno LTS to a
+    named destination endpoint (ceres, atlas, …) via Globus.
+
+    \b
+    Runs as a DRY-RUN by default — prints the file list without submitting.
+    Pass --submit to perform the actual Globus transfer.
+
+    \b
+    Typical workflow:
+        agir-cv query --db semif --filters "state=NC" --limit 500
+        agir-cv scinet-transfer                   # dry-run → ceres (default)
+        agir-cv scinet-transfer --dst atlas       # dry-run → atlas
+        agir-cv scinet-transfer --dst ceres --submit   # submit to ceres
+        agir-cv scinet-transfer --dst atlas --submit   # submit to atlas
+
+    Destinations are configured in conf/globus/default.yaml under
+    globus.destinations. Add new endpoints there without touching Python.
+    """
+    # ---- Build Hydra overrides ----
+    extra_overrides: List[str] = list(override or [])
+    if src_root:
+        extra_overrides.append(f"globus.src_root={src_root}")
+    if wait:
+        extra_overrides.append("globus.transfer.wait=true")
+
+    cfg = _compose_cfg(config, extra_overrides)
+    cfg = finalize_cfg(
+        cfg,
+        stage="scinet_transfer",
+        dataset="unknown",
+        cli_overrides=extra_overrides,
+    )
+
+    setup_logging(cfg)
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+
+    # Resolve destination name (CLI flag > config default)
+    globus_cfg = cfg_dict.get("globus", {})
+    dst_name = dst or globus_cfg.get("default_dst", "ceres")
+
+    from agir_cvtoolkit.pipelines.stages.scinet_transfer import (
+        SciNetTransferStage,
+        _extract_transfer_paths,
+        _load_records,
+        _resolve_destination,
+    )
+
+    # Validate the destination name early so dry-run also catches typos
+    dst_endpoint, dst_root_val = _resolve_destination(globus_cfg, dst_name)
+
+    # ---- Dry-run mode (default) ----
+    if not submit:
+        from pathlib import Path as _Path
+
+        run_root    = _Path(cfg_dict["paths"]["run_root"])
+        path_columns = globus_cfg.get("path_columns", [])
+        src_root_val = globus_cfg.get("src_root", "")
+
+        try:
+            records = _load_records(run_root)
+        except FileNotFoundError as exc:
+            typer.echo(f"[dry-run] ERROR: {exc}", err=True)
+            raise typer.Exit(1)
+
+        pairs = _extract_transfer_paths(records, path_columns, src_root_val)
+        typer.echo(
+            f"[dry-run] Would transfer {len(pairs)} unique files.\n"
+            f"  src endpoint : {globus_cfg.get('juno_endpoint')}  (juno)\n"
+            f"  dst endpoint : {dst_endpoint}  ({dst_name})\n"
+            f"  src_root     : {src_root_val}\n"
+            f"  dst_root     : {dst_root_val}\n"
+        )
+        if pairs:
+            typer.echo("First 10 source paths:")
+            for src, _ in pairs[:10]:
+                typer.echo(f"  {src}")
+            if len(pairs) > 10:
+                typer.echo(f"  ... and {len(pairs) - 10} more")
+        typer.echo(f"\nRe-run with --submit to transfer to {dst_name}.")
+        return
+
+    # ---- Live transfer (--submit) ----
+    stage = SciNetTransferStage(cfg_dict, dst_name=dst_name)
+    task_id = stage.run()
+
+    if task_id:
+        typer.echo(
+            f"Globus transfer submitted to {dst_name}.\n"
+            f"  task_id  : {task_id}\n"
+            f"  run_root : {cfg_dict['paths']['run_root']}\n"
+            f"  Monitor  : https://app.globus.org/activity/{task_id}"
+        )
+    else:
+        typer.echo("No files were transferred (empty query results or no valid paths).")
+
 if __name__ == "__main__":
     app()
