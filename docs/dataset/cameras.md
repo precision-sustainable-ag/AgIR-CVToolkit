@@ -62,6 +62,8 @@ Used for more recent image acquisitions. Paired with the Excelitas inspec.x L 4/
 | **Interface** | 10GigE (RJ-45) |
 | **Lens Mount** | M72×0.75 |
 
+**References:** [Allied Vision shr661CXGE](https://www.alliedvision.com/en/products/area-scan-cameras/shr/shr-10gige/view/2039)
+
 ### Lens: Excelitas inspec.x L 4/60
 
 | Specification | Value |
