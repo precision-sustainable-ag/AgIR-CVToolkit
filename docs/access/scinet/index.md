@@ -1,133 +1,192 @@
 ---
 layout: default
-title: SciNet Usage
-parent: Access & Query
-nav_order: 3
-has_children: true
+title: Setup & Query Guide
+parent: SciNet Usage
+grand_parent: Access & Query
+nav_order: 1
 ---
 
-# Using AgIR on SciNet
+# SciNet Setup & Query Guide
 {: .no_toc }
 
-Complete guides for accessing and querying the AgIR dataset on USDA's SciNet HPC infrastructure.
+Get the AgIR-CVToolkit running on SciNet and start querying the database.
 {: .fs-6 .fw-300 }
 
 ---
 
-## Table of contents
+## Table of Contents
 {: .no_toc .text-delta }
 
 1. TOC
 {:toc}
 
---- 
+---
 
 ## Overview
 
-The AgIR dataset is hosted on SciNet, USDA's high-performance computing infrastructure. This section provides comprehensive documentation for:
+The AgIR dataset lives on **Juno LTS**. The workflow is:
 
-- **Setting up** your SciNet environment
-- **Staging data** from Juno LTS to Ceres cluster
-- **Running queries** using the AgIR-CVToolkit
-- **Submitting SLURM jobs** for efficient computation
-- **Managing data** across storage tiers
+1. Clone the repo and install the toolkit on Ceres
+2. Copy the database from Juno to your project space
+3. Point the config at your local copy of the database
+4. Run `agir-cv query` to select records
+5. Run `agir-cv scinet-transfer` to pull the corresponding image files from Juno
+
+---
+
+## 1. Clone the Repo
+
+```bash
+git clone https://github.com/precision-sustainable-ag/AgIR-CVToolkit.git
+cd AgIR-CVToolkit
+```
+
+---
+
+## 2. Copy the Database from Juno
+
+The database needs to be in your project space on Ceres before you can query it. Copy it from Juno LTS at:
+
+```
+/LTS/project/dash_agir/semifield-database/AgIR_DB_v1_0_202510.db
+```
+
+**Option A — Globus web UI** (easiest)
+
+1. Open [app.globus.org](https://app.globus.org) and log in with your SciNet credentials
+2. **Left pane**: Select `SCINet-Juno`, navigate to `/LTS/project/dash_agir/semifield-database/`
+3. **Right pane**: Select `SCINet-Ceres`, navigate to `/project/<your_project>/semifield-db/`
+4. Select `AgIR_DB_v1_0_202510.db` and click **Start**
+
+**Option B — Globus CLI**
+
+```bash
+globus transfer \
+  <JUNO_ENDPOINT>:/LTS/project/dash_agir/semifield-database/AgIR_DB_v1_0_202510.db \
+  <CERES_ENDPOINT>:/project/<your_project>/semifield-db/AgIR_DB_v1_0_202510.db
+```
 
 {: .note }
-> **Prerequisites**: SciNet account with access to Ceres cluster and Juno LTS storage.
+> Copy to your **project directory**, not your home directory — home quotas are small.
 
 ---
 
-## Data Structure on JUNO
+## 3. Configure the Database Path
 
-The AgIR dataset on JUNO consists of two components:
+Edit `src/agir_cvtoolkit/conf/db/default.yaml` to point at your local copy:
 
-**1. Database:** SQLite database containing metadata and file paths to the actual data. Copy this to your local user space for querying.
-```bash
-# Copy database to your user space
-cp /juno/lts/agir/database/agir_database.db ~/agir/
+```yaml
+semif:
+  db_path: /project/<your_project>/semifield-db/AgIR_DB_v1_0_202510.db
+  table: semif
 ```
 
-**2. Physical Data:** Image files, annotations, and derived products stored in JUNO long-term storage. Access these directly using paths from database queries.
+Alternatively, override the path inline without editing the file:
 
-**Workflow:**
-1. Copy the database to your SciNet user directory
-2. Query the database to find images matching your criteria  
-3. Access physical data files using the returned paths
-
+```bash
+agir-cv query --db semif \
+  -o db.semif.db_path=/project/<your_project>/semifield-db/AgIR_DB_v1_0_202510.db \
+  --preview 5
+```
 
 ---
 
-## Quick Start
+## 4. Install Dependencies and Activate the Environment
 
-### 1. Initial Setup
+Follow the installation instructions in the repo, then activate your environment before running any commands.
+
+---
+
+## 5. Run a Query
+
+### Verify everything is working
 
 ```bash
-# Connect to Ceres
-ssh <username>@ceres.scinet.usda.gov
-
-# Verify access
-lfs quota -u $USER /project/<project_name>
+agir-cv query --db semif \
+  --sample "stratified:by=category_common_name|estimated_area_bin,per_group=5"
 ```
 
-### 2. Install AgIR-CVToolkit
+Results are written to:
 
-```bash
-# Install Mambaforge (one-time)
-cd /project/<project_name>
-wget https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-Linux-x86_64.sh
-bash Mambaforge-Linux-x86_64.sh -b -p /project/<project_name>/miniforge3
-
-# Create environment
-mamba create -p /project/<project_name>/envs/agir_cv python=3.10
-mamba activate /project/<project_name>/envs/agir_cv
-pip install agir-cvtoolkit
+```
+outputs/runs/<project>/<subname>/query/
+  ├── query.json        ← used by scinet-transfer
+  ├── query.csv
+  └── query_spec.json   ← full spec for reproducibility
 ```
 
-### 3. Stage Data from Juno
+The exact run path is printed to the terminal after the query completes.
+
+### Filtering
+
+Multiple `--filters` flags combine with AND logic. Multiple values within one flag use OR logic.
 
 ```bash
-# Setup Globus
+# Single filter
+agir-cv query --db semif --filters "state=NC"
+
+# Multiple values (OR)
+agir-cv query --db semif --filters "state=NC,TX,GA"
+
+# Multiple filters (AND)
+agir-cv query --db semif \
+  --filters "state=NC" \
+  --filters "category_common_name=barley"
+
+# Numeric range
+agir-cv query --db semif --filters "estimated_bbox_area_cm2>=50"
+
+# Preview without writing output
+agir-cv query --db semif --filters "state=NC" --preview 10
+
+# Limit results
+agir-cv query --db semif --filters "state=NC" --limit 100
+```
+
+### Sampling
+
+```bash
+# Random sample
+agir-cv query --db semif --sample "random:n=200"
+
+# Seeded (reproducible) — same seed always returns the same records
+agir-cv query --db semif --sample "seeded:n=200,seed=42"
+
+# Stratified: N records per species
+agir-cv query --db semif \
+  --sample "stratified:by=category_common_name,per_group=10"
+
+# Stratified: N records per species × area bin combination
+agir-cv query --db semif \
+  --sample "stratified:by=category_common_name|estimated_area_bin,per_group=5"
+```
+
+### Output Format
+
+```bash
+agir-cv query --db semif --filters "state=NC" --out json    # default
+agir-cv query --db semif --filters "state=NC" --out csv
+agir-cv query --db semif --filters "state=NC" --out parquet
+```
+
+---
+
+## 6. Transfer Query Results from Juno
+
+Once you have a query, use `agir-cv scinet-transfer` to pull the corresponding image files from Juno to Ceres (or Atlas). See the [SciNet Transfer Guide](transfer-guide.html) for full details.
+
+```bash
+# Install and log in to Globus CLI if you haven't already
 pipx install globus-cli
 globus login
+globus session update --all
 
-# Transfer database
-globus transfer $JUNO_EP:"/LTS/project/<proj>/databases/agir_semif.db" \
-  $CERES_EP:"/project/<proj>/databases/agir_semif.db"
+# Dry-run first — previews the file list without submitting
+agir-cv scinet-transfer
+
+# Submit the actual transfer
+agir-cv scinet-transfer --submit
 ```
-
-### 4. Run Query via SLURM
-
-```bash
-# Submit job
-sbatch query_job.sh
-
-# Monitor
-squeue -u $USER
-```
-
-[See detailed examples →](query-guide.html#complete-workflow-example)
-
----
-
-## Key Concepts
-
-### Storage Tiers
-
-| Location | Description | Use Case |
-|:---------|:------------|:---------|
-| **Juno LTS** | Long-term storage (backed up) | Archive, source data |
-| **/project** | Active project space | Databases, scripts |
-| **/project/90daydata** | High-speed scratch | Temporary staging |
-| **$TMPDIR** | Node-local SSD | Fast I/O during jobs |
-
-### Workflow Overview
-
-```
-[Juno LTS] → (Globus/DTN) → [Ceres /project] → (SLURM job) → [$TMPDIR] → Results
-```
-
-{: .important }
-> Juno LTS is **not mounted** on compute nodes. Always stage data to Ceres first.
 
 ---
 
@@ -135,13 +194,4 @@ squeue -u $USER
 
 - **SciNet Documentation**: [scinet.usda.gov/guides](https://scinet.usda.gov/guides/)
 - **SciNet Support**: scinet-support@usda.gov
-- **AgIR Toolkit**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
-
----
-
-## Related Documentation
-
-- [Installation Guide](../installation.html) - Install AgIR-CVToolkit
-- [Query Tools](../query-tools.html) - General query documentation
-- [SemiF Schema](../../dataset/semif.html) - Database structure
-- [Field Schema](../../dataset/field.html) - Field observations
+- **AgIR Toolkit Issues**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
