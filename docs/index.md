@@ -186,4 +186,3 @@ If you use the Agricultural Image Repository in your research, please cite:
 
 - **GitHub**: [AgIR-CVToolkit Repository](https://github.com/precision-sustainable-ag/AgIR-CVToolkit)
 - **Issues**: [Report bugs or request features](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
-- **Email**: [support@example.com](mailto:support@example.com)
