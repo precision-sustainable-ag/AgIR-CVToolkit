@@ -185,5 +185,4 @@ agir-cv scinet-transfer --submit
 ## Support
 
 - **SciNet Documentation**: [scinet.usda.gov/guides](https://scinet.usda.gov/guides/)
-- **SciNet Support**: scinet-support@usda.gov
 - **AgIR Toolkit Issues**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
