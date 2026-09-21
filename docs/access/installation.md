@@ -8,7 +8,7 @@ nav_order: 1
 # Installation & Setup
 {: .no_toc }
 
-Install and configure the AgIR-CVToolkit for database access.
+Install the AgIR-CVToolkit and point it at the database.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -19,340 +19,138 @@ Install and configure the AgIR-CVToolkit for database access.
 
 ---
 
-## System Requirements
+## Requirements
 
 | Component | Requirement |
 |-----------|-------------|
-| **Python** | 3.10+ (3.13 recommended) |
+| **Python** | 3.13 (uv installs it for you) |
 | **OS** | Linux, macOS, or Windows with WSL2 |
-| **RAM** | 8 GB minimum |
-| **Storage** | Space for databases + outputs |
-
-{: .note }
-> GPU is not required for querying databases. GPU requirements apply only if using the full CV pipeline (inference, training).
+| **RAM** | 8 GB minimum; more for large exports |
+| **Storage** | About {{ site.data.db_stats.database.size_gb }} GB for the database, plus space for outputs |
 
 ---
 
-## Installation
+## Install
 
-### Method: Conda/Mamba
-
-For a controlled environment with all dependencies:
+The toolkit uses [uv](https://docs.astral.sh/uv/) to manage its environment.
 
 ```bash
-# Install mamba (faster than conda)
-conda install mamba -n base -c conda-forge
+# Install uv (once)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone repository
+# Get the toolkit and install it
 git clone https://github.com/precision-sustainable-ag/AgIR-CVToolkit.git
 cd AgIR-CVToolkit
+uv sync
 
-# Create environment from file
-mamba env create -f environment.yml
-mamba activate agcv
-
-# Install toolkit in editable mode
-pip install -e .
-
-# Verify installation
-agir-cv --help
+# Check it works
+uv run agir-cv --help
 ```
+
+`uv sync` creates a `.venv` folder with Python 3.13 and installs everything the toolkit needs. The `--help` output lists two commands: `query` and `scinet-transfer`.
+
+{: .note }
+> Run commands with `uv run agir-cv ...`, or activate the environment once (`source .venv/bin/activate`) and use `agir-cv ...` directly. The rest of these docs write `agir-cv ...`.
 
 ---
 
-## Database Configuration
+## Point the Toolkit at the Database
 
-The toolkit needs to know where your database files are located. Choose one of the following methods:
+The database is a single SQLite file (`AgIR_DB_v2_0_202609.db`). To get it on SciNet, see [SciNet Setup](scinet-usage.html#1-get-the-database). Then tell the toolkit where it is, in one of two ways.
 
-### Option 1: Configuration File (Recommended)
-
-Create a configuration file that persists database locations:
-
-```bash
-# Create config directory (if it doesn't exist)
-mkdir -p src/agir_cvtoolkit/conf/db
-
-# Create database config
-cat > src/agir_cvtoolkit/conf/db/default.yaml << EOF
-semif:
-  db_path: /path/to/semif.db
-  table: semif
-field:
-  db_path: /path/to/field.db
-  table: field_data
-EOF
-```
-
-**Example with actual paths:**
+**Option 1: config file** (permanent). Edit `semif.db_path` in `src/agir_cvtoolkit/conf/db/default.yaml`:
 
 ```yaml
-# src/agir_cvtoolkit/conf/db/default.yaml
 semif:
-  db_path: /data/agir/AgIR_DB_v1_SemiF.db
+  db_path: /path/to/AgIR_DB_v2_0_202609.db
   table: semif
-field:
-  db_path: /data/agir/AgIR_DB_v1_Field.db
-  table: field_data
 ```
 
-### Option 2: Command-Line Override
+Leave the other entries in the file as they are.
 
-Specify database paths directly in each command:
+**Option 2: command-line override** (one-off):
 
 ```bash
-agir-cv query --db semif \
-  -o "db.semif.db_path=/path/to/semif.db"
+agir-cv query --db semif -o "db.semif.db_path=/path/to/AgIR_DB_v2_0_202609.db" --preview 5 --limit 5
 ```
-
-
-{: .tip }
-> **Recommended**: Use Option 1 (configuration file) for permanent setup. Use Option 2 for one-off queries or testing different databases.
 
 ---
 
-## Verify Installation
-
-### Test Database Connection
+## Verify
 
 ```bash
-# Test SemiF database
-agir-cv query --db semif --preview 5
-
-# Test Field database
-agir-cv query --db field --preview 5
+agir-cv query --db semif --preview 5 --limit 5
 ```
 
-**Expected output:**
+You should see five records:
 
 ```
 ============================================================
 Preview: First 5 records
 ============================================================
 
-[INFO] - Query stats (semif): rows_scanned=5 rows_returned=5
 Record 1:
-  ID: MD_1659702025
-  Image: .../MD_1659702025.jpg
-  category_common_name: giant foxtail
+  ID: MD_Row-15_1656091550
+  Image: ...oped-images/MD_2022-06-24/images/MD_Row-15_1656091550.jpg
+  Mask: ...-06-24/meta_masks/semantic_masks/MD_Row-15_1656091550.png
   state: MD
-  estimated_bbox_area_cm2: 0.08
-  ...
+  datetime: 2022:06:25 01:23:00
+  batch_id: MD_2022-06-24
+  image_id: MD_Row-15_1656091550
+  season: summer_weeds_2022
+  bbot_version: 2.0
+  crs: LOCAL
+  ... and 7 more fields
 ------------------------------------------------------------
+Record 2:
+  ...
 ```
 
-### Test CLI Commands
+{: .warning }
+> Keep `--limit`. `--preview 5` on its own prints 5 records **and then exports every row in the database**.
 
-```bash
-# Check available commands
-agir-cv --help
-
-# Should show:
-#   query        - Query databases
-#   infer-seg    - Run segmentation inference
-#   upload-cvat  - Upload to CVAT
-#   download-cvat - Download from CVAT
-#   preprocess   - Preprocess data
-#   train        - Train models
-```
-
-### Test Python Import
-
-```python
-# test_install.py
-from agir_cvtoolkit.core.db import AgirDB
-
-# Test connection
-try:
-    with AgirDB.connect(
-        db_type="semif",
-        db_path="/path/to/semif.db",
-        table="semif"
-    ) as db:
-        count = db.count()
-        print(f"✅ Connected to SemiF: {count} records")
-except Exception as e:
-    print(f"❌ Error: {e}")
-```
+The first query on a large file can take a few seconds while it loads.
 
 ---
 
-## Get Sample Databases
+## Output
 
-For testing and learning, use the sample databases included in the repository:
-
-```bash
-# Clone repository if you haven't already
-git clone https://github.com/precision-sustainable-ag/AgIR-CVToolkit.git
-cd AgIR-CVToolkit
-
-# Sample databases are in:
-ls tests/data/db/
-
-# Output:
-#   AgIR_DB_v1_SemiF_sample_50.db
-#   AgIR_DB_v1_Field_sample_10.db
-```
-
-**Update your config to use samples:**
-
-```yaml
-# src/agir_cvtoolkit/conf/db/default.yaml
-semif:
-  db_path: tests/data/db/AgIR_DB_v1_SemiF_sample_50.db
-  table: semif
-field:
-  db_path: tests/data/db/AgIR_DB_v1_Field_sample_10.db
-  table: field_data
-```
-
-
----
-
-## Output Directory
-
-The toolkit automatically creates output directories when you run queries. No manual setup needed!
-
-**Auto-generated structure:**
+Each run writes to a standard folder:
 
 ```
-outputs/
-└── runs/
-    └── {project_name}/{subname}/
-        ├── query/           # Query results
-        │   ├── query.json
-        │   ├── query.csv
-        │   └── query_spec.json
-        ├── cfg.yaml         # Configuration snapshot
-        └── logs/            # Execution logs
+outputs/runs/{project_name}/{subname}/
+├── query/
+│   ├── query.csv          # or query.json / query.parquet, per --out
+│   └── query_spec.json    # the exact query, for reproducibility
+├── cfg.yaml               # configuration snapshot
+└── logs/
 ```
 
 ---
 
 ## Troubleshooting
 
-### Command Not Found
-
-**Problem:** `agir-cv: command not found`
-
-**Solutions:**
-
-```bash
-# 1. Check if installed
-pip show agir-cvtoolkit
-
-# 2. Use python -m syntax
-python -m agir_cvtoolkit.cli --help
-
-# 3. Activate environment
-mamba activate agcv  # or: conda activate agcv
-
-# 4. Reinstall if needed
-mamba activate agcv
-pip install --force-reinstall agir-cvtoolkit
-```
-
-### Database Not Found
-
-**Problem:** `FileNotFoundError: Database not found`
-
-**Solutions:**
-
-```bash
-# 1. Verify database exists
-ls -lh /path/to/semif.db
-
-# 2. Use absolute path
-agir-cv query --db semif \
-  -o "db.semif.db_path=/absolute/path/to/semif.db"
-
-# 3. Check permissions
-ls -l /path/to/semif.db
-chmod 644 /path/to/semif.db  # Fix if needed
-```
-
-### Import Errors
-
-**Problem:** `ModuleNotFoundError: No module named 'X'`
-
-**Solutions:**
-
-```bash
-# 1. Install missing dependency
-pip install <missing-package>
-
-# 2. Check for conflicts
-pip check
-
-# 3. Create fresh environment
-mamba create -n agcv-fresh python=3.13
-mamba activate agcv-fresh
-pip install agir-cvtoolkit
-```
-
-### Permission Denied
-
-**Problem:** `PermissionError: Permission denied`
-
-**Solutions:**
-
-```bash
-# Check and fix file permissions
-ls -l /path/to/semif.db
-chmod 644 /path/to/semif.db
-
-# Check directory permissions
-ls -ld /path/to/
-chmod 755 /path/to/
-```
+| Problem | Fix |
+|---------|-----|
+| `agir-cv: command not found` | Use `uv run agir-cv ...`, or activate the environment with `source .venv/bin/activate`. |
+| `FileNotFoundError: Database not found` | Check the path (`ls -lh /path/to/AgIR_DB_v2_0_202609.db`) and use an absolute path. |
+| A query runs for a very long time | You left off `--limit`, so it is exporting every match. Press `Ctrl+C` and add `--limit` or a sample. See the [Query Guide](query-tools.html#before-you-run-a-query). |
 
 ---
 
-## Update & Uninstall
-
-### Update Toolkit
+## Update
 
 ```bash
-# Update toolkit within mamba environment
-mamba activate agcv
-pip install --upgrade agir-cvtoolkit
+git pull
+uv sync
 ```
 
-### Uninstall
-
-```bash
-# Uninstall package
-pip uninstall agir-cvtoolkit
-
-# Remove mamba/conda environment
-mamba env remove -n agcv  # or: conda env remove -n agcv
-```
+To uninstall, delete the `.venv` folder.
 
 ---
 
 ## Next Steps
 
-Now that you have the toolkit installed and configured:
-
-1. **[Learn to Query →](query-tools.html)** - Filter, sample, and export data
-2. **[View Examples →](query-tools.html#common-query-patterns)** - Common query patterns
-3. **[Explore Schemas →](../dataset/)** - Understand database structure
-
----
-
-## Additional Resources
-
-### Documentation
-- **[Query Guide](query-tools.html)** - Complete query documentation
-- **[SemiF Schema](../dataset/semif.html)** - SemiF database fields
-- **[Field Schema](../dataset/field.html)** - Field database fields
-- **[Full Pipeline Docs](https://github.com/precision-sustainable-ag/AgIR-CVToolkit)** - Complete toolkit features
-
-### Support
-- **GitHub Repository**: [AgIR-CVToolkit](https://github.com/precision-sustainable-ag/AgIR-CVToolkit)
-- **Issues**: [Report bugs](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
-- **Discussions**: [Ask questions](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/discussions)
-
----
-
-{: .note }
-> This guide covers installation for database querying only. For the full CV pipeline (inference, annotation, training), see the [complete installation guide](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/docs/GETTING_STARTED/installation.md).
+1. **[SciNet Setup](scinet-usage.html)**: copy the database and transfer files
+2. **[Query Guide](query-tools.html)**: filter, sample and export
+3. **[SemiF Schema](../dataset/semif.html)**: every column explained
