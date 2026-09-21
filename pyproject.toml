@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agir-cvtoolkit"
 version = "0.1.0"
-description = "AgIR CV Toolkit: query, inference, and pipelines for agricultural computer vision workflows."
+description = "AgIR CV Toolkit: query the AgIR database and fetch the matching files."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = { text = "MIT" }
@@ -17,18 +17,11 @@ dependencies = [
   "typer>=0.12",
   "pydantic>=2.6",
   "rich>=13",
-
-  # --- Scientific / CV Stack ---
-  "numpy>=1.26",
-  "Pillow>=10.3",
-  "opencv-python>=4.9",
-  "matplotlib>=3.8",
+  "pyyaml",
 
   # --- Data / I/O ---
-  "sqlalchemy>=2.0",
+  "pandas>=2.0",
   "pyarrow>=21.0.0",
-  "fastparquet>=2024.11.0",
-  "cvat-sdk>=2.14",
 ]
 
 [project.optional-dependencies]
@@ -37,28 +30,6 @@ dev = [
   "black>=24.0",
   "ruff>=0.5",
   "mypy>=1.8",
-]
-
-torch-cpu = [
-  "torch>=2.8.0",
-  "torchvision==0.23.0",
-  "torchmetrics==1.8.2",
-  "albumentationsx>=2.0.12",
-  "segmentation-models-pytorch>=0.5.0",
-  "pytorch-lightning>=2.5.5",
-  "GPUtil>=1.4.0",
-]
-
-# Example CUDA version (install using index-url)
-# pip install .[torch-cu121] --index-url https://download.pytorch.org/whl/cu121
-torch-cu121 = [
-  "torch>=2.8.0",
-  "torchvision==0.23.0",
-  "torchmetrics==1.8.2",
-  "albumentationsx>=2.0.12",
-  "segmentation-models-pytorch>=0.5.0",
-  "pytorch-lightning>=2.5.5",
-  "GPUtil>=1.4.0",
 ]
 
 [project.scripts]

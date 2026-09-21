@@ -1,8 +1,6 @@
 name: agcv
 channels:
   - conda-forge
-  - nvidia      # for pytorch-cuda builds
-  - defaults
 
 dependencies:
   # === Core ===
@@ -15,12 +13,6 @@ dependencies:
   - ruff
   - mypy
 
-  # === Scientific / Computer Vision Stack ===
-  - numpy
-  - pillow
-  - opencv
-  - matplotlib
-
   # === Pip-installed Packages ===
   - pip:
       # ---- Configuration / CLI ----
@@ -28,24 +20,8 @@ dependencies:
       - typer>=0.12
       - pydantic>=2.6
       - rich>=13
+      - pyyaml
 
       # ---- Data Handling ----
+      - pandas>=2.0
       - pyarrow>=21.0.0
-      - fastparquet>=2024.11.0
-
-      # ---- CV / ML Core ----
-      - torch>=2.8.0
-      - torchmetrics==1.8.2
-      - torchvision==0.23.0
-      - albumentationsx>=2.0.12
-
-      # ---- Segmentation / Deep Learning ----
-      - segmentation-models-pytorch>=0.5.0
-      - pytorch-lightning>=2.5.5
-
-      # ---- Tools / SDKs ----
-      - cvat-sdk>=2.14
-      - GPUtil>=1.4.0
-
-      # ---- YOLO / Ultralytics ----
-      - ultralytics

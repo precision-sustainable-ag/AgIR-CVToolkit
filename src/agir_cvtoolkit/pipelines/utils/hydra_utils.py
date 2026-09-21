@@ -111,13 +111,6 @@ def finalize_cfg(cfg: DictConfig, *, stage: str, dataset: str, cli_overrides: li
     sub = {
         "logs": run_root / "logs",
         "query": run_root / "query",
-        "images": run_root / "images",
-        "masks": run_root / "masks",
-        "colorized_masks": run_root / "colorized_masks",
-        "cutouts": run_root / "cutouts",
-        "plots": run_root / "plots",
-        "cvat_downloads": run_root / "cvat_downloads",  # ADD THIS LINE
-        "preprocessed": run_root / "preprocessed",
     }
     for p in [run_root, *sub.values()]:
         p.mkdir(parents=True, exist_ok=True)
@@ -145,30 +138,12 @@ def finalize_cfg(cfg: DictConfig, *, stage: str, dataset: str, cli_overrides: li
         "run_root": str(run_root),
         "logs": str(sub["logs"]),
         "query": str(sub["query"]),
-        "images": str(sub["images"]),
-        "masks": str(sub["masks"]),
-        "colorized_masks": str(sub["colorized_masks"]),
-        "cutouts": str(sub["cutouts"]),
-        "plots": str(sub["plots"]),
-        "cvat_downloads": str(sub["cvat_downloads"]),
-        "preprocessed": str(sub["preprocessed"]),
         "cfg_path": str(run_root / "cfg.yaml"),
-        "metrics_path": str(run_root / "metrics.json"),
-        "manifest_path": str(run_root / "manifest.csv"),  # CHANGED: .jsonl -> .csv
     }
-
-    # Setup logging dir
-    cfg.train.logger.csv.save_dir = cfg.paths.logs
-    cfg.train.logger.wandb.save_dir = cfg.paths.logs
-    cfg.train.logger.wandb.name = cfg.runtime.run_id
 
     # Persist the frozen cfg for reproducibility (after we enriched it)
     cfg_path = Path(cfg.paths["cfg_path"])
     with open(cfg_path, "w") as f:
         OmegaConf.save(config=cfg, f=f.name, resolve=True)
-
-    # Touch metrics + manifest files
-    Path(cfg.paths["metrics_path"]).write_text("{}")
-    Path(cfg.paths["manifest_path"]).touch()
 
     return cfg

@@ -1,13 +1,6 @@
 defaults:
   - io: default
   - db: default
-  - det_inference: default
-  - seg_inference: default
-  - cvat_upload: default
-  - cvat_download: default
-  - augment: default
-  - preprocess: default
-  - train: default
   - globus: default
   - _self_                     # Ensures overriding behavior
 
