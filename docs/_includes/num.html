@@ -1,0 +1,12 @@
+{%- comment -%}
+  Integer with thousands separators (Liquid has no built-in for this).
+  Usage: include num.html with n=some_number. Handles values up to 999,999,999.
+{%- endcomment -%}
+{%- assign n = include.n | plus: 0 -%}
+{%- if n >= 1000000 -%}
+{{- n | divided_by: 1000000 }},{{ n | modulo: 1000000 | divided_by: 1000 | prepend: "00" | slice: -3, 3 }},{{ n | modulo: 1000 | prepend: "00" | slice: -3, 3 -}}
+{%- elsif n >= 1000 -%}
+{{- n | divided_by: 1000 }},{{ n | modulo: 1000 | prepend: "00" | slice: -3, 3 -}}
+{%- else -%}
+{{- n -}}
+{%- endif -%}

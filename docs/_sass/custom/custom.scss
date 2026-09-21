@@ -138,6 +138,48 @@ th {
   color: #15803d;
 }
 
+// Numeric columns and totals row (Statistics page)
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.total-row td {
+  border-top: 2px solid #16a34a;
+}
+
+// Sortable table headers (Statistics page). The script adds .sortable-col, so no arrows show without JS.
+th.sortable-col {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+
+  &::after {
+    content: " \21C5";           // up/down arrows: sortable
+    opacity: 0.35;
+  }
+
+  &:hover {
+    background: #dcfce7;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #16a34a;
+    outline-offset: -2px;
+  }
+
+  &[aria-sort="ascending"]::after {
+    content: " \25B2";           // ▲
+    opacity: 1;
+  }
+
+  &[aria-sort="descending"]::after {
+    content: " \25BC";           // ▼
+    opacity: 1;
+  }
+}
+
 // Image Gallery Styles
 .gallery-section {
   margin: 3rem 0;

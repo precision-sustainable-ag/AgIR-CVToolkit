@@ -1,5 +1,5 @@
 semif:
-  db_path: tests/data/db/AgIR_DB_v1_SemiF_sample_50_20251016.db
+  db_path: /project/dash_agir/semifield-database/AgIR_DB_v2_0_202609.db
   table: semif
 field:
   db_path: tests/data/db/AgIR_DB_v1_Field_sample_10_20251016.db

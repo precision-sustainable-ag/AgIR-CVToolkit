@@ -1,0 +1,13 @@
+{%- comment -%}
+  Rounded short form for stat cards: 3233631 -> 3.2M, 273335 -> 273K, 70 -> 70.
+  Usage: include compact_num.html with n=some_number.
+{%- endcomment -%}
+{%- assign n = include.n | plus: 0 -%}
+{%- if n >= 1000000 -%}
+{%- assign tenths = n | plus: 50000 | divided_by: 100000 -%}
+{{- tenths | divided_by: 10 }}.{{ tenths | modulo: 10 }}M
+{%- elsif n >= 1000 -%}
+{{- n | plus: 500 | divided_by: 1000 }}K
+{%- else -%}
+{{- n -}}
+{%- endif -%}

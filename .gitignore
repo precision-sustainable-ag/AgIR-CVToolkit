@@ -10,7 +10,9 @@ checkpoints/
 experimental/
 run.sh
 scripts/exports/
-
+docs/.bundle
+docs/vendor
+.bundle/
 # Pages
 docs/_build/
 _site/

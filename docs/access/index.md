@@ -77,7 +77,7 @@ LIMIT 100;
 | [Installation & Setup](installation.html) | Install AgIR-CVToolkit and configure databases |
 | [SciNet Setup & Usage](scinet-usage.html) | Get the AgIR-CVToolkit running on SciNet |
 | [Query Guide](query-tools.html) | Filter, sample, and export data |
-| [SemiF Schema](../dataset/semif.html) | Individual plant cutouts - 62 fields |
+| [SemiF Schema](../dataset/semif.html) | Individual plant cutouts - {{ site.data.db_stats.database.columns }} fields |
 | [Field Schema](../dataset/field.html) | Field observations - 72 fields |
 
 ---

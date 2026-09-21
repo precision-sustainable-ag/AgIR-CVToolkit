@@ -27,6 +27,8 @@ Semi-Field Database - Optimized for machine learning training with precise bound
 
 **Purpose:** Stores processed image cutouts/crops of individual plants with detailed bounding box annotations, taxonomy, and image characteristics. Optimized for machine learning training and synthetic image generation.
 
+**Current release:** `{{ site.data.db_stats.database.file }}`, with {% include num.html n=site.data.db_stats.totals.rows %} rows and {{ site.data.db_stats.database.columns }} columns. Current counts by species and size class are on the [Statistics](statistics.html) page.
+
 
 </div>
 
@@ -35,7 +37,7 @@ Semi-Field Database - Optimized for machine learning training with precise bound
 ## Understanding SEMIF Records
 
 {: .important }
-> **Key Concept**: Each row in the SEMIF database represents a **single bounding box detection instance** (individual plant or plant part), not a complete image. Multiple detection instances may originate from the same source image.
+> **Key Concept**: Each row in the SEMIF database represents a **single bounding box detection instance** (individual plant or plant part), not a complete image. Multiple detection instances may originate from the same source image. Images with no detections at all appear as a single placeholder row with `cutout_id = NULL`.
 
 ### Database Structure
 
@@ -45,20 +47,20 @@ The SEMIF database is organized around **bounding box detections** rather than i
 Standardized, color-corrected photos capturing entire scenes with multiple potted plants. Each source image has been processed to ensure consistent quality across the dataset. Images are identified by `image_id` and contain dimensions in `fullres_width` and `fullres_height`.
 
 **Bounding Box Instances** *(Every Record)*  
-Every row in SEMIF represents one bounding box detection. Each detection includes coordinates in `bbox_xywh`, a unique `cutout_id`, and links back to its source image via `image_id`.
+Every row in SEMIF represents one bounding box detection. Each detection includes normalized coordinates in `xmin`, `ymin`, `xmax` and `ymax`, a unique `cutout_id`, and links back to its source image via `image_id`. Pixel coordinates in `bbox_xywh` are available for most detections.
 
 **Cutout Images** *(Subset of Records)*  
-Some source images have been processed to extract individual plant segments as separate cutout files. Whether cutouts exist is determined at the **source image level** - either all detections from an image have cutouts, or none do. Check the `cutout_exists` field to determine availability.
+Some detections have been processed to extract individual plant segments as separate cutout files. Availability is tracked **per detection**, so detections from the same image can differ. Check the `cutout_exists` field, or whether `cutout_juno_url` is filled, to determine availability.
 
 ### Detection Records: Bounding Boxes vs. Cutouts
 
 {: .note }
-> **Critical Distinction**: All records contain bounding box annotations (`bbox_xywh`), but not all records have extracted cutout images. Cutout availability is determined by the source image - all detections from the same `image_id` will have the same `cutout_exists` value.
+> **Critical Distinction**: All detections have bounding box coordinates (`xmin`, `ymin`, `xmax`, `ymax`), but not all have extracted cutout images. Cutout availability is tracked per detection, so detections from the same `image_id` can have different `cutout_exists` values.
 
 ```
 Source Image (image_id: IMG_001)
 ├── Image 1 (cutout_id: IMG_001_0) → bbox ✓ | cutout ✓
-└── Image 1 (cutout_id: IMG_001_1) → bbox ✓ | cutout ✓  
+└── Image 1 (cutout_id: IMG_001_1) → bbox ✓ | cutout ✗
 
 Source Image (image_id: IMG_002)
 ├── Image 2 (cutout_id: IMG_002_0) → bbox ✓ | cutout ✗
@@ -67,18 +69,19 @@ Source Image (image_id: IMG_002)
 
 ### What Every Detection Includes
 
-**Mandatory (all records):**
+**Mandatory (all detections):**
 - **Unique identifier**: `cutout_id` specific to this detection
 - **Source reference**: `image_id` linking back to the original full-sized image
-- **Bounding box coordinates**: `bbox_xywh` defining the detection's location in the source image
+- **Bounding box coordinates**: `xmin`, `ymin`, `xmax`, `ymax` defining the detection's location in the source image (normalized to 0-1)
 
-**Optional (determined by source image):**
+**Optional (determined per detection):**
 - **Extracted cutout image**: Path to the cropped image in `cutout_path` or `cropout_path`
 - **Segmentation mask**: Pixel-level plant boundary in `cutout_mask_path`
 - **Availability flag**: `cutout_exists` field (1 = cutout available, 0 = bbox only)
+- **Download links**: `cutout_juno_url` and its sibling columns, filled only where the file exists
 
 {: .tip }
-> **Query Strategy**: Filter by `cutout_exists = 1` to get only records with extracted cutout images. All records can be used for object detection training with bounding boxes.
+> **Query Strategy**: Filter by `cutout_exists = 1` to get only records with extracted cutout images. All records can be used for object detection training with bounding boxes. Add `is_primary = 1` to keep one preferred view of each plant that appears in several overlapping images. When you also filter by `batch_id` or `category_usda_symbol`, `cutout_juno_url IS NOT NULL` selects the same rows as `cutout_exists = 1` and runs much faster.
 
 <!-- <div class="stats-grid" markdown="1">
 
@@ -164,10 +167,10 @@ Track when and how data was processed.
 
 | Field | Type | Description |
 |:------|:-----|:------------|
-| `season` | String | Growing season identifier |
-| `datetime` | String | Timestamp of image capture |
-| `bbot_version` | String | Version of the bounding box annotation tool used |
-| `batch_id` | String | Identifier for the processing batch |
+| `season` | String | Growing season identifier, for example `summer_weeds_2023` |
+| `datetime` | String | Timestamp of image capture. **Mixed formats**: most rows look like `2022:06:25 01:11:08`, the rest like `2025-10-03T15:28:39`, so do not compare it as text. Use `batch_id` or `season` to select by date |
+| `bbot_version` | String | Version of the field-robot software that captured the images (`2.0`, `3.0` or `3.1`) |
+| `batch_id` | String | Site and capture date, for example `MD_2022-06-24`; also identifies the processing batch |
 
 ---
 
@@ -180,30 +183,32 @@ Original source image information and camera settings.
 | `image_id` | String | Unique identifier for the source image |
 | `fullres_height` | Integer | Height of the full-resolution source image in pixels |
 | `fullres_width` | Integer | Width of the full-resolution source image in pixels |
-| `exif_meta` | String | EXIF metadata from the original image |
-| `camera_info` | String | Camera model and settings information |
+| `exif_meta` | String | EXIF metadata from the original image, packed as JSON |
+| `camera_info` | String | Camera pose and calibration for the image (position, orientation, field of view, lens coefficients), packed as JSON |
 | `lens_model` | String | Camera lens model used for capture |
 
 ---
 
 ### 3. File Paths & Storage
 
-Locations of images, masks, and metadata files.
+Locations and download links for images, masks, and metadata files.
 
 | Field | Type | Description |
 |:------|:-----|:------------|
-| `ncsu_nfs` | String | NCSU network file system location |
 | `image_path` | String | Path to the full source image |
 | `mask_path` | String | Path to the segmentation mask file |
 | `json_path` | String | Path to associated JSON metadata |
-| `cutout_ncsu_nfs` | String | NCSU NFS location for cutout images |
-| `cropout_path` | String | Path to the cropped/cutout image |
-| `cutout_path` | String | Alternate path to cutout image |
+| `cropout_path` | String | Path to the JPEG crop of the detection |
+| `cutout_path` | String | Path to the PNG cutout (transparent background) |
 | `cutout_mask_path` | String | Path to the cutout's segmentation mask |
 | `cutout_json_path` | String | Path to cutout's JSON metadata |
+| `cropout_juno_url` | String | Direct-download URL for the crop; filled only where the file exists |
+| `cutout_juno_url` | String | Direct-download URL for the cutout; filled only where the file exists |
+| `cutout_mask_juno_url` | String | Direct-download URL for the cutout mask; filled only where the file exists |
+| `cutout_json_juno_url` | String | Direct-download URL for the cutout metadata; filled only where the file exists |
 
 {: .tip }
-> **Storage Redundancy**: Both `cropout_path` and `cutout_path` are provided for system reliability.
+> **Crop vs. cutout**: `cropout_path` is a JPEG crop of the detection and `cutout_path` is the PNG cutout with a transparent background. These paths are derived from `cutout_id`, so use `cutout_exists` or the `*_juno_url` columns to confirm a file exists.
 
 ---
 
@@ -213,13 +218,17 @@ Bounding boxes, masks, and detection metadata.
 
 | Field | Type | Description |
 |:------|:-----|:------------|
-| `has_masks` | Integer | Boolean flag indicating presence of segmentation masks (0/1) |
-| `is_primary` | Integer | Boolean flag marking primary annotation in overlapping cases |
-| `cutout_exists` | Float | Boolean flag indicating if cutout file exists |
+| `is_primary` | Integer | Boolean flag (0/1) marking the preferred detection when the same plant appears in overlapping images. `NULL` where not evaluated |
+| `cutout_exists` | Integer | Boolean flag (0/1) indicating if the cutout file exists |
 | `cutout_id` | String | Unique identifier for this cutout |
-| `bbox_xywh` | String | Bounding box coordinates in [x, y, width, height] format |
+| `bbox_xywh` | String | Bounding box in pixels, [x, y, width, height] format. Filled for most, not all, detections |
 | `category_class_id` | Integer | Numeric class identifier for the category |
 | `overlapping_cutout_ids` | String | IDs of other cutouts that overlap with this one |
+| `xmin`, `ymin`, `xmax`, `ymax` | Float | Bounding box in normalized image coordinates (0-1, top-left origin). Boxes near the image edge can fall slightly outside 0-1 |
+| `det_classname` | String | Detector class: `plant` or `color_checker` |
+| `det_confidence` | Float | Detector confidence, where recorded |
+| `non_target_weed` | String | Off-target-weed flag: `'0'` or `'1'`, plus a stray literal `'non_target_weed'` in some rows. Use `IN ('0', '1')` for a clean flag |
+| `non_target_weed_pred_conf` | Float | Model confidence for the `non_target_weed` flag |
 
 **Example `bbox_xywh` format:**
 ```python
@@ -234,10 +243,14 @@ Geographic location and area measurements.
 
 | Field | Type | Description |
 |:------|:-----|:------------|
-| `bbox_area_cm2` | Float | Measured bounding box area in square centimeters |
-| `estimated_bbox_area_cm2` | Float | Estimated bounding box area in square centimeters |
-| `estimated_area_bin` | String | Categorical size bin for the estimated area |
-| `state` | String | US state where image was captured |
+| `bbox_area_cm2` | Float | Measured bounding box area in square centimeters. Reliable only where `crs` is `LOCAL` |
+| `estimated_bbox_area_cm2` | Float | Estimated bounding box area in square centimeters. Same caveat as `bbox_area_cm2` |
+| `estimated_area_bin` | String | Categorical size bin for the estimated area, in cm²: `0-1`, `1-10`, `10-100`, `100-500`, `500-1000`, `1000-5000`, `5000-10000`, `10000+`. Only present for detections matched to the production database |
+| `state` | String | US state where image was captured (`MD`, `NC` or `TX`) |
+| `crs` | String | Coordinate reference system of `global_coordinates`: `LOCAL`, `32618`, `4326`, `32617` or `32614` |
+| `global_coordinates` | String | Bounding box corners and centroid in world coordinates, packed as JSON (`top_left`, `top_right`, `bottom_left`, `bottom_right`, `global_centroid`). `NULL` when not georeferenced |
+| `local_coordinates` | String | Pixel-space corners. Always `NULL` in this release |
+| `pixel_area` | Float | `cutout_width * cutout_height`, in pixels |
 
 ---
 
@@ -249,7 +262,7 @@ Complete taxonomic hierarchy from kingdom to species.
 |:------|:-----|:------------|
 | `category_usda_symbol` | String | USDA PLANTS database symbol code |
 | `category_eppo_code` | String | European and Mediterranean Plant Protection Organization code |
-| `category_group` | String | High-level taxonomic or functional group |
+| `category_group` | String | High-level taxonomic or functional group: `dicot`, `monocot`, `unknown`, `colorchecker` or `background` |
 | `category_class` | String | Taxonomic class |
 | `category_subclass` | String | Taxonomic subclass |
 | `category_order` | String | Taxonomic order |
@@ -258,7 +271,7 @@ Complete taxonomic hierarchy from kingdom to species.
 | `category_species` | String | Taxonomic species name |
 | `category_common_name` | String | Common name of the plant |
 | `category_authority` | String | Taxonomic authority citation |
-| `category_multispecies` | String | Flag or notes for multi-species annotations |
+| `category_multispecies` | String | JSON array of the component USDA symbols for catalog classes that cover several species (mostly `[]`) |
 
 **Example taxonomy:**
 ```
@@ -277,14 +290,15 @@ Growth and life cycle information.
 
 | Field | Type | Description |
 |:------|:-----|:------------|
-| `category_growth_habit` | String | Growth habit (e.g., forb, grass, shrub, vine) |
-| `category_duration` | String | Life cycle duration (annual, biennial, perennial) |
+| `category_growth_habit` | String | Growth habit (e.g., graminoid, forb/herb, shrub) |
+| `category_duration` | String | Life cycle duration (annual, biennial, perennial, or a combination) |
 
 **Growth habits:**
-- `forb` - Herbaceous flowering plant
-- `grass` - Graminoid
+- `graminoid` - Grass-like plant (grasses, sedges)
+- `forb/herb` - Herbaceous flowering plant
+- `forb/herb vine` - Herbaceous climbing/trailing plant
+- `forb/herb, subshrub` - Herbaceous plant with a woody base
 - `shrub` - Woody plant
-- `vine` - Climbing/trailing plant
 
 ---
 
@@ -298,7 +312,7 @@ Links to external databases and display properties.
 | `category_taxonomic_notes` | String | Additional taxonomic notes or clarifications |
 | `category_hex` | String | Hexadecimal color code for visualization |
 | `category_rgb` | String | RGB color values for visualization |
-| `category_alias` | String | Alternative or simplified category name |
+| `category_alias` | String | JSON array of alternative names (mostly `[]`) |
 
 **Example color values:**
 ```
@@ -314,21 +328,21 @@ Technical properties of the cropped image.
 
 | Field | Type | Description |
 |:------|:-----|:------------|
-| `cutout_height` | Float | Height of the cutout image in pixels |
-| `cutout_width` | Float | Width of the cutout image in pixels |
-| `blur_effect` | Float | Quantitative measure of image blur |
-| `num_components` | Float | Number of connected components in the segmentation |
+| `cutout_height` | Integer | Height of the cutout image in pixels |
+| `cutout_width` | Integer | Width of the cutout image in pixels |
+| `blur_effect` | Float | Sharpness score from 0 to 1 (higher is sharper) |
+| `num_components` | Integer | Number of connected components in the segmentation |
 | `cropout_rgb_mean` | String | Mean RGB values of the cutout image |
 | `cropout_rgb_std` | String | Standard deviation of RGB values |
-| `extends_border` | Float | Boolean flag indicating if cutout extends to image border |
+| `extends_border` | Integer | Boolean flag indicating if cutout extends to image border |
 
 {: .tip }
-> **Quality Filtering**: Use `blur_effect < 50` for high-quality images. Filter by `num_components` to find clean single-plant images.
+> **Quality Filtering**: `blur_effect` runs from 0 to 1 with typical values around 0.3 to 0.4, so pick a cutoff from the distribution rather than a fixed number. Filter by `num_components` to find clean single-plant images.
 
 **Example quality thresholds:**
 ```python
-# High quality images
-blur_effect < 50
+# Sharper half of the cutouts (the median is about 0.36)
+blur_effect >= 0.36
 
 # Single plant detection
 num_components <= 2
@@ -336,6 +350,22 @@ num_components <= 2
 # Not extending to border
 extends_border == 0
 ```
+
+---
+
+### 10. Cultivar
+
+Only populated for cultivar-tracking batches (mostly peanut trials).
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `cultivar_id` | Integer | Numeric cultivar class ID |
+| `cultivar_name` | String | Cultivar name, for example `Peanut - Bailey II` |
+| `cultivar_display_name` | String | Display name of the cultivar |
+| `cultivar_line_name` | String | Breeding line name, when applicable |
+| `cultivar_registered` | Integer | `1` for a registered cultivar, `0` for an experimental line |
+| `cultivar_hex` | String | Display color as a hex code |
+| `cultivar_r`, `cultivar_g`, `cultivar_b` | Integer | Display color as RGB components (0-255) |
 
 ---
 
@@ -359,13 +389,6 @@ Access via `category_eppo_code`
 [Visit EPPO →](https://www.eppo.int/)
 </div>
 
-<div class="feature-card" markdown="1">
-
-**NCSU Network File System**  
-Primary storage infrastructure
-
-Fields: `ncsu_nfs`, `cutout_ncsu_nfs`
-</div>
 
 </div>
 
@@ -377,8 +400,7 @@ Fields: `ncsu_nfs`, `cutout_ncsu_nfs`
 {: .note }
 > **Query this database** using the AgIR-CVToolkit. The toolkit provides powerful filtering, sampling, and export capabilities.
 
-[Learn How to Query SEMIF →](https://github.com/yourusername/AgIR-CVToolkit/blob/main/docs/PIPELINE_STAGES/01_query/db_query_usage.md){: .btn .btn-primary }
-[View Complete Query Guide →](../access/query-guide.html){: .btn .btn-primary }
+[View Complete Query Guide →](../access/query-tools.html){: .btn .btn-primary }
 
 ---
 

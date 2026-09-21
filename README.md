@@ -1,6 +1,6 @@
 # AgIR-CVToolkit
 
-Agricultural Image Repository Computer Vision Toolkit - A pipeline for querying the SemiF and Field Agricultural Image Repository (AgIR) and running CV models.
+Agricultural Image Repository Computer Vision Toolkit - query the SemiF and Field Agricultural Image Repository (AgIR) databases and fetch the matching files.
 
 ## Quick Start
 
@@ -9,29 +9,16 @@ Agricultural Image Repository Computer Vision Toolkit - A pipeline for querying 
 pip install -e .
 
 # Query database
-agir-cvtoolkit query --db semif --filters "state=NC"
+agir-cv query --db semif --filters "state=NC" --limit 100
 
-# Run detection
-agir-cvtoolkit infer-det
-
-# Run inference
-agir-cvtoolkit infer-seg
-
-# Upload to CVAT
-agir-cvtoolkit cvat-upload
-
-# Download annotations
-agir-cvtoolkit cvat-download
+# Fetch the files for the last query from Juno (dry-run unless --submit is given)
+agir-cv scinet-transfer
 ```
 
-## Pipeline Stages
+## What it does
 
-1. **Query** - Query SemiF/Field databases
-2. **Inference** - Run segmentation models
-3. **CVAT Upload** - Upload images for annotation
-4. **CVAT Download** - Download refined annotations
-5. **Preprocessing** - Prepare data for training
-6. **Training** - Train models
+1. **Query** - Filter, sample and export records from the SemiF/Field databases
+2. **Transfer** - Pull the files for a query from Juno to SciNet with Globus
 
 ## Documentation
 
