@@ -45,28 +45,36 @@ This repository is a product of the **Digital Agricultural Systems Hub**, a coll
 
 ## Dataset at a Glance
 
+{% assign t = site.data.db_stats.totals %}
 <div class="stats-grid" markdown="0">
   <div class="stat-card">
-    <span class="stat-number">183K+</span>
+    <span class="stat-number">{% include compact_num.html n=t.images %}</span>
     <span class="stat-label">Plant Images</span>
   </div>
 
   <div class="stat-card">
-    <span class="stat-number">2.7M+</span>
+    <span class="stat-number">{% include compact_num.html n=t.detections %}</span>
     <span class="stat-label">Instances</span>
+  </div>
+
+  <div class="stat-card">
+    <span class="stat-number">{% include compact_num.html n=t.primary_cutouts %}</span>
+    <span class="stat-label">Primary Cutouts</span>
   </div>
   
   <div class="stat-card">
-    <span class="stat-number">60+</span>
+    <span class="stat-number">{{ t.species }}</span>
     <span class="stat-label">Species</span>
   </div>
   
   <div class="stat-card">
-    <span class="stat-number">3</span>
+    <span class="stat-number">{{ site.data.db_stats.by_state.size }}</span>
     <span class="stat-label">Locations</span>
   </div>
 
 </div>
+
+Database version {{ site.data.db_stats.database.version }} ({{ site.data.db_stats.database.release }}). [Full breakdown by species and size class →](dataset/statistics.html)
 
 ---
 
