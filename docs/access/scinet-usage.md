@@ -5,184 +5,104 @@ parent: Access & Query
 nav_order: 2
 ---
 
-# SciNet Setup & Query Guide
+# SciNet Setup & Usage
 {: .no_toc }
 
-Get the AgIR-CVToolkit running on SciNet and start querying the database.
+Get the database on SciNet, query it, and pull the matching files from Juno.
 {: .fs-6 .fw-300 }
-
 
 ---
 
 ## Overview
 
-The AgIR dataset lives on **Juno LTS**. The workflow is:
+The AgIR database and its cutout files live on **Juno LTS**. On SciNet you will:
 
-1. Clone the repo and install the toolkit on Ceres
-2. Copy the database from Juno to your project space
-3. Point the config at your local copy of the database
-4. Run `agir-cv query` to select records
-5. Run `agir-cv scinet-transfer` to pull the corresponding image files from Juno
+1. [Install the toolkit](installation.html)
+2. Get the database (section 1 below)
+3. Query it (see the [Query Guide](query-tools.html))
+4. Transfer the files for your query with Globus (section 2 below)
 
----
-
-## 1. Clone the Repo
-
-```bash
-git clone https://github.com/precision-sustainable-ag/AgIR-CVToolkit.git
-cd AgIR-CVToolkit
-```
+{: .tip }
+> uv keeps its download cache in `~/.cache/uv`, and home quotas on SciNet are small. Before running `uv sync`, set `export UV_CACHE_DIR=/project/<your_project>/uv-cache`.
 
 ---
 
-## 2. Copy the Database from Juno
+## 1. Get the Database
 
-The database needs to be in your project space on Ceres before you can query it. Copy it from Juno LTS at:
+{: .tip }
+> If you are in the `dash_agir` project on Ceres, the database is already at `/project/dash_agir/semifield-database/AgIR_DB_v2_0_202609.db`. Point the toolkit at it (see [Installation](installation.html#point-the-toolkit-at-the-database)) and skip the copy.
 
-```
-/LTS/project/dash_agir/semifield-database/AgIR_DB_v1_0_202510.db
-```
+Otherwise, copy it from Juno LTS. It is in `/LTS/project/dash_agir/semifield-database/`, and the file is about {{ site.data.db_stats.database.size_gb }} GB.
 
-**Option A — Globus web UI** (easiest)
+**Option A: Globus web UI** (easiest)
 
 1. Open [app.globus.org](https://app.globus.org) and log in with your SciNet credentials
-2. **Left pane**: Select `SCINet-Juno`, navigate to `/LTS/project/dash_agir/semifield-database/`
-3. **Right pane**: Select `SCINet-Ceres`, navigate to `/project/<your_project>/semifield-db/`
-4. Select `AgIR_DB_v1_0_202510.db` and click **Start**
+2. **Left pane**: select `SCINet-Juno` and go to `/LTS/project/dash_agir/semifield-database/`
+3. **Right pane**: select `SCINet-Ceres` and go to `/project/<your_project>/semifield-db/`
+4. Select `AgIR_DB_v2_0_202609.db` and click **Start**
 
-**Option B — Globus CLI**
+**Option B: Globus CLI**
 
 ```bash
 globus transfer \
-  <JUNO_ENDPOINT>:/LTS/project/dash_agir/semifield-database/AgIR_DB_v1_0_202510.db \
-  <CERES_ENDPOINT>:/project/<your_project>/semifield-db/AgIR_DB_v1_0_202510.db
+  <JUNO_ENDPOINT>:/LTS/project/dash_agir/semifield-database/AgIR_DB_v2_0_202609.db \
+  <CERES_ENDPOINT>:/project/<your_project>/semifield-db/AgIR_DB_v2_0_202609.db
 ```
 
 {: .note }
-> Copy to your **project directory**, not your home directory — home quotas are small.
+> Copy to your **project directory**, not your home directory.
 
----
-
-## 3. Configure the Database Path
-
-Edit `src/agir_cvtoolkit/conf/db/default.yaml` to point at your local copy:
-
-```yaml
-semif:
-  db_path: /project/<your_project>/semifield-db/AgIR_DB_v1_0_202510.db
-  table: semif
-```
-
-Alternatively, override the path inline without editing the file:
+Then set `db_path` as described in [Installation](installation.html#point-the-toolkit-at-the-database) and run a query, for example:
 
 ```bash
-agir-cv query --db semif \
-  -o db.semif.db_path=/project/<your_project>/semifield-db/AgIR_DB_v1_0_202510.db \
-  --preview 5
+agir-cv query --db semif --preview 5 --limit 5
 ```
 
 ---
 
-## 4. Install Dependencies and Activate the Environment
+## 2. Transfer the Files
 
-Follow the installation instructions in [Installation Guide](installation.html), then activate your environment before running any commands.
+`agir-cv scinet-transfer` reads your latest query and pulls the matching files (crop, cutout, mask and metadata) from Juno to Ceres or Atlas with Globus.
 
----
+**One-time setup**
 
-## 5. Run a Query
+1. Install the Globus CLI and log in:
 
-### Verify everything is working
+   ```bash
+   uv tool install globus-cli     # if `globus` is not found afterwards: uv tool update-shell
+   globus login
+   globus session update --all
+   ```
 
-```bash
-agir-cv query --db semif \
-  --sample "stratified:by=category_common_name|estimated_area_bin,per_group=5"
-```
+2. Fill in the endpoint IDs in `src/agir_cvtoolkit/conf/globus/default.yaml`: `juno_endpoint`, and `endpoint` under `destinations.ceres` (and `atlas` if you use it). They are blank in the repository. The same file sets the destination folders.
 
-Results are written to:
-
-```
-outputs/runs/<project>/<subname>/query/
-  ├── query.json        ← used by scinet-transfer
-  ├── query.csv
-  └── query_spec.json   ← full spec for reproducibility
-```
-
-The exact run path is printed to the terminal after the query completes.
-
-### Filtering
-
-Multiple `--filters` flags combine with AND logic. Multiple values within one flag use OR logic.
+**Transfer**
 
 ```bash
-# Single filter
-agir-cv query --db semif --filters "state=NC"
-
-# Multiple values (OR)
-agir-cv query --db semif --filters "state=NC,TX,GA"
-
-# Multiple filters (AND)
-agir-cv query --db semif \
-  --filters "state=NC" \
-  --filters "category_common_name=barley"
-
-# Numeric range
-agir-cv query --db semif --filters "estimated_bbox_area_cm2>=50"
-
-# Preview without writing output
-agir-cv query --db semif --filters "state=NC" --preview 10
-
-# Limit results
-agir-cv query --db semif --filters "state=NC" --limit 100
-```
-
-### Sampling
-
-```bash
-# Random sample
-agir-cv query --db semif --sample "random:n=200"
-
-# Seeded (reproducible) — same seed always returns the same records
-agir-cv query --db semif --sample "seeded:n=200,seed=42"
-
-# Stratified: N records per species
-agir-cv query --db semif \
-  --sample "stratified:by=category_common_name,per_group=10"
-
-# Stratified: N records per species × area bin combination
-agir-cv query --db semif \
-  --sample "stratified:by=category_common_name|estimated_area_bin,per_group=5"
-```
-
-### Output Format
-
-```bash
-agir-cv query --db semif --filters "state=NC" --out json    # default
-agir-cv query --db semif --filters "state=NC" --out csv
-agir-cv query --db semif --filters "state=NC" --out parquet
-```
-
----
-
-## 6. Transfer Query Results from Juno
-
-Once you have a query, use `agir-cv scinet-transfer` to pull the corresponding image files from Juno to Ceres (or Atlas). See the [SciNet Transfer Guide](transfer-guide.html) for full details.
-
-```bash
-# Install and log in to Globus CLI if you haven't already
-pipx install globus-cli
-globus login
-globus session update --all
-
-# Dry-run first — previews the file list without submitting
+# Dry run: lists the files, submits nothing
 agir-cv scinet-transfer
 
-# Submit the actual transfer
+# Start the transfer to Ceres (the default destination)
 agir-cv scinet-transfer --submit
+
+# Send to Atlas instead
+agir-cv scinet-transfer --dst atlas --submit
 ```
+
+{: .tip }
+> Add `--filters "cutout_juno_url is not null"` to the query you transfer from. The transfer lists the four file paths of every row, so rows without cutouts would ask for files that do not exist.
+
+{: .warning }
+> Do not use `--projection` on the query you transfer from. The transfer reads the path columns (`cropout_path`, `cutout_path`, `cutout_mask_path`, `cutout_json_path`), and a query without them transfers **0 files**. If you do use `--projection`, include those four columns.
+
+{: .note }
+> The transfer reads `outputs/runs/<project>/<subname>/query/query.json` if it exists, and otherwise `query.csv`. If you change output formats between queries, delete the old file so you do not transfer the previous query.
+
+To fetch just a few files yourself, each row also has direct download links in `cutout_juno_url` and its sibling columns.
 
 ---
 
 ## Support
 
-- **SciNet Documentation**: [scinet.usda.gov/guides](https://scinet.usda.gov/guides/)
-- **AgIR Toolkit Issues**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
+- **SciNet documentation**: [scinet.usda.gov/guides](https://scinet.usda.gov/guides/)
+- **AgIR Toolkit issues**: [GitHub Issues](https://github.com/precision-sustainable-ag/AgIR-CVToolkit/issues)
