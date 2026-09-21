@@ -20,13 +20,6 @@ agir-cv scinet-transfer
 1. **Query** - Filter, sample and export records from the SemiF/Field databases
 2. **Transfer** - Pull the files for a query from Juno to SciNet with Globus
 
-## Documentation
-
-Full documentation available in `docs/` directory:
-- [Getting Started](docs_copy/GETTING_STARTED/installation.md)
-- [Pipeline Overview](docs_copy/GETTING_STARTED/pipeline_overview.md)
-- [Configuration Guide](docs_copy/CONFIGURATION/hydra_config_quick_ref.md)
-
 ## Structure
 
 ```
