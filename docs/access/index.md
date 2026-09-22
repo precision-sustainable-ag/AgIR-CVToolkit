@@ -33,15 +33,16 @@ Querying and accessing data from the AgIR dataset.
 ### AgIR-CVToolkit
 
 ```bash
-# 100 primary cutouts of barley (USDA symbol HOVU)
+# Big primary cutouts of soybean (USDA symbol GLMA4)
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU" \
+  --filters "category_usda_symbol=GLMA4" \
   --filters "cutout_juno_url is not null" --filters "is_primary=1" \
+  --filters "estimated_area_bin=1000-5000,5000-10000,10000+" \
   --limit 100
 
 # A balanced set: 20 primary cutouts per species
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU,PISA6,SECE" \
+  --filters "category_usda_symbol=GLMA4,ZEA,GOHI" \
   --filters "cutout_juno_url is not null" --filters "is_primary=1" \
   --sample "stratified:by=category_common_name,per_group=20"
 ```
@@ -56,9 +57,10 @@ agir-cv query --db semif \
 ```sql
 SELECT cutout_id, category_common_name, estimated_area_bin, cutout_juno_url
 FROM semif
-WHERE category_usda_symbol = 'HOVU'
+WHERE category_usda_symbol = 'GLMA4'
   AND is_primary = 1
   AND cutout_juno_url IS NOT NULL
+  AND estimated_area_bin IN ('1000-5000', '5000-10000', '10000+')
 LIMIT 100;
 ```
 

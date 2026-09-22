@@ -115,7 +115,7 @@ The first query on a large file can take a few seconds while it loads.
 
 ## Output
 
-Each run writes to a standard local folder, named after your `project.name` and `project.subname` (`test` / `001` by default — see `conf/config.yaml`, or set your own with `-o project.name=... -o project.subname=...`):
+Each run writes to a standard local folder, named after your `project.name` and `project.subname` (`demo` / `big-soy` by default — see `conf/config.yaml`, or set your own with `-o project.name=... -o project.subname=...`):
 
 ```
 outputs/runs/{project_name}/{subname}/

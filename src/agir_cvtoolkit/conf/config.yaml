@@ -5,8 +5,8 @@ defaults:
   - _self_                     # Ensures overriding behavior
 
 project:
-  name: test
-  subname: "001"
+  name: demo
+  subname: big-soy
 run:
   stage: infer
   dataset: semifield_v1

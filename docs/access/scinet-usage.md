@@ -62,7 +62,15 @@ agir-cv query --db semif --preview 5 --limit 5
 
 ## 2. Transfer the Files
 
-`agir-cv scinet-transfer` reads your latest query and pulls the matching files (crop, cutout, mask and metadata) from Juno to Ceres or Atlas with Globus.
+`agir-cv scinet-transfer` reads your latest query and pulls the matching files (crop, cutout, mask and metadata) from Juno to Ceres or Atlas with Globus. The examples below follow one query end to end — big primary soybean cutouts:
+
+```bash
+agir-cv query --db semif \
+  --filters "category_usda_symbol=GLMA4" \
+  --filters "cutout_juno_url is not null" --filters "is_primary=1" \
+  --filters "estimated_area_bin=1000-5000,5000-10000,10000+" \
+  --limit 100
+```
 
 **One-time setup**
 
@@ -94,7 +102,7 @@ agir-cv scinet-transfer --dst atlas --submit
 Both the dry run and `--submit` print the destination folder the files land in (or would land in), and a Globus link that opens that folder for the destination you picked:
 
 ```
-Files would land in: /90daydata/dash_agir/tmp/demo/big-soy/semifield-cutouts/NC_2023-07-11/  (on ceres)
+Files would land in: /90daydata/dash_agir/tmp/demo/big-soy/semifield-cutouts/  (on ceres)
 Globus link to that folder: https://app.globus.org/file-manager?origin_id=...&origin_path=...
 ```
 
@@ -106,13 +114,16 @@ The destination folder for each named destination (`ceres`, `atlas`, ...) is a *
 <dst_root>/<project.name>/<project.subname>/semifield-cutouts/<batch_id>/<file>
 ```
 
-So `project.name=demo`, `project.subname=big-soy` (the defaults are `test`/`001` — see `conf/config.yaml`, or set them with `-o project.name=... -o project.subname=...`) lands at `.../demo/big-soy/semifield-cutouts/NC_2023-07-11/...`. A query spanning several batches lands in `.../demo/big-soy/semifield-cutouts/` with one subfolder per batch.
+`project.name` and `project.subname` default to `demo` and `big-soy` (see `conf/config.yaml`), so the query above lands at `.../demo/big-soy/semifield-cutouts/...` with no extra flags. Set your own with `-o project.name=... -o project.subname=...`.
+
+That query touches 5 batches (it has no `batch_id` filter), so it lands directly under `semifield-cutouts/`, with one subfolder per batch. A narrower query — one `batch_id`, or a species that only appears in a single batch — lands one level deeper, directly inside that batch's own subfolder.
 
 **The run folder comes along too.** If `globus.local_endpoint` is set (see step 3 above), `scinet-transfer` also copies this run's local folder — `cfg.yaml`, `logs/`, `query/` (your query results), `globus_batch.txt` and its manifest — into that same project folder, so the destination ends up mirroring your local `outputs/runs/demo/big-soy/` exactly:
 
 ```
 demo/big-soy/                          # on the destination, under dst_root
-├── semifield-cutouts/NC_2023-07-11/   # the actual cutout files
+├── semifield-cutouts/
+│   └── <batch_id>/                    # one subfolder per batch — the actual cutout files
 ├── cfg.yaml
 ├── logs/
 ├── query/
