@@ -19,10 +19,10 @@ local_endpoint: # <local endpoint you're currently on>
 destinations:
   ceres:
     endpoint: # <ceres endpoint>   # SCINet-Ceres
-    dst_root: "/90daydata/dash_agir/tmp/"
+    dst_root: "/90daydata/<your_project>/agir_cvtoolkit_runs/"
   atlas:
     endpoint: # <atlas endpoint>   # SCINet-Atlas
-    dst_root: "/90daydata/dash_agir/tmp/"
+    dst_root: "/90daydata/<your_project>/agir_cvtoolkit_runs/"
 
 # ---- Default destination (used when --dst is not passed) ----
 default_dst: "ceres"
