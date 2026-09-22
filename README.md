@@ -5,14 +5,14 @@ Agricultural Image Repository Computer Vision Toolkit - query the SemiF and Fiel
 ## Quick Start
 
 ```bash
-# Install
-pip install -e .
+# Install (uv creates .venv and installs Python 3.13 if needed: https://docs.astral.sh/uv/)
+uv sync
 
 # Query database
-agir-cv query --db semif --filters "state=NC" --limit 100
+uv run agir-cv query --db semif --filters "state=NC" --limit 100
 
 # Fetch the files for the last query from Juno (dry-run unless --submit is given)
-agir-cv scinet-transfer
+uv run agir-cv scinet-transfer
 ```
 
 ## What it does
