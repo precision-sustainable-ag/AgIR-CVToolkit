@@ -48,15 +48,16 @@ Examples write `agir-cv ...`. Prefix them with `uv run` if you have not activate
 # Look at 5 records
 agir-cv query --db semif --preview 5 --limit 5
 
-# 100 primary cutouts of barley (USDA symbol HOVU)
+# Big primary cutouts of soybean (USDA symbol GLMA4)
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU" \
+  --filters "category_usda_symbol=GLMA4" \
   --filters "cutout_juno_url is not null" --filters "is_primary=1" \
+  --filters "estimated_area_bin=1000-5000,5000-10000,10000+" \
   --limit 100
 
 # A balanced set: 20 primary cutouts per species
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU,PISA6,SECE" \
+  --filters "category_usda_symbol=GLMA4,ZEA,GOHI" \
   --filters "cutout_juno_url is not null" --filters "is_primary=1" \
   --sample "stratified:by=category_common_name,per_group=20"
 ```
@@ -69,18 +70,18 @@ Repeat `--filters` for each condition (they combine with **AND**). A comma-separ
 
 ```bash
 # AND: separate flags
-agir-cv query --db semif --filters "batch_id=MD_2022-06-24" --filters "category_usda_symbol=PADI" --limit 100
+agir-cv query --db semif --filters "batch_id=NC_2023-07-11" --filters "category_usda_symbol=GLMA4" --limit 100
 
 # OR: several values in one flag
-agir-cv query --db semif --filters "category_usda_symbol=HOVU,PISA6,SECE" --limit 100
+agir-cv query --db semif --filters "category_usda_symbol=GLMA4,ZEA,GOHI" --limit 100
 
 # NULL checks
-agir-cv query --db semif --filters "category_usda_symbol=HOVU" --filters "cutout_juno_url is not null" --limit 100
+agir-cv query --db semif --filters "category_usda_symbol=GLMA4" --filters "cutout_juno_url is not null" --limit 100
 ```
 
 ### Species
 
-Use `category_usda_symbol` (for example `HOVU` for barley). It is indexed, so it is much faster than `category_common_name`. Find symbols on the [Statistics](../dataset/statistics.html#by-species) page.
+Use `category_usda_symbol` (for example `GLMA4` for soybean). It is indexed, so it is much faster than `category_common_name`. Find symbols on the [Statistics](../dataset/statistics.html#by-species) page.
 
 ### Cutouts and primary cutouts
 
@@ -88,7 +89,7 @@ Use `category_usda_symbol` (for example `HOVU` for barley). It is indexed, so it
 
 ```bash
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU" \
+  --filters "category_usda_symbol=GLMA4" \
   --filters "cutout_juno_url is not null" --filters "is_primary=1" \
   --limit 100
 ```
@@ -99,7 +100,7 @@ agir-cv query --db semif \
 
 ```bash
 agir-cv query --db semif \
-  --filters "category_usda_symbol=GOHI" \
+  --filters "category_usda_symbol=GLMA4" \
   --filters "cutout_juno_url is not null" \
   --filters "estimated_area_bin=1000-5000,5000-10000,10000+" \
   --limit 50
@@ -144,16 +145,16 @@ Sampling applies after filtering.
 
 ```bash
 # Random
-agir-cv query --db semif --filters "category_usda_symbol=HOVU" --sample "random:n=200"
+agir-cv query --db semif --filters "category_usda_symbol=GLMA4" --sample "random:n=200"
 
 # Seeded: the same seed returns the same rows every time
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU" --filters "cutout_juno_url is not null" \
+  --filters "category_usda_symbol=GLMA4" --filters "cutout_juno_url is not null" \
   --sample "seeded:n=200,seed=42"
 
 # Stratified: per_group rows from each group ("|" separates several columns)
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU,PISA6,SECE" \
+  --filters "category_usda_symbol=GLMA4,ZEA,GOHI" \
   --filters "cutout_juno_url is not null" --filters "is_primary=1" \
   --sample "stratified:by=category_common_name|estimated_area_bin,per_group=20"
 ```
@@ -168,8 +169,8 @@ agir-cv query --db semif \
 Results are ordered by `cutout_id` unless you sort. Sorting by a column without an index sorts every match, so filter first.
 
 ```bash
-agir-cv query --db semif --filters "category_usda_symbol=HOVU" --sort "batch_id:desc" --limit 50
-agir-cv query --db semif --filters "category_usda_symbol=HOVU" --sort "batch_id:desc" --limit 50 --offset 50
+agir-cv query --db semif --filters "category_usda_symbol=GLMA4" --sort "batch_id:desc" --limit 50
+agir-cv query --db semif --filters "category_usda_symbol=GLMA4" --sort "batch_id:desc" --limit 50 --offset 50
 ```
 
 ---
@@ -198,7 +199,7 @@ outputs/runs/{project_name}/{subname}/query/
 
 ```python
 import pandas as pd
-df = pd.read_csv("outputs/runs/test/001/query/query.csv")
+df = pd.read_csv("outputs/runs/demo/big-soy/query/query.csv")
 ```
 
 ### Counting
@@ -206,11 +207,11 @@ df = pd.read_csv("outputs/runs/test/001/query/query.csv")
 The command line cannot count without exporting, so count with Python or SQL:
 
 ```python
-n = db.filter(category_usda_symbol="HOVU", is_primary=1).where("cutout_juno_url IS NOT NULL").count()
+n = db.filter(category_usda_symbol="GLMA4", is_primary=1).where("cutout_juno_url IS NOT NULL").count()
 ```
 ```sql
 SELECT COUNT(*) FROM semif
-WHERE category_usda_symbol = 'HOVU' AND cutout_juno_url IS NOT NULL AND is_primary = 1;
+WHERE category_usda_symbol = 'GLMA4' AND cutout_juno_url IS NOT NULL AND is_primary = 1;
 ```
 
 ### Getting the files
@@ -219,7 +220,7 @@ Each row has direct download links in `cutout_juno_url` and its sibling columns.
 
 ```bash
 agir-cv query --db semif \
-  --filters "category_usda_symbol=HOVU" --filters "cutout_juno_url is not null" \
+  --filters "category_usda_symbol=GLMA4" --filters "cutout_juno_url is not null" \
   --projection "cutout_id,cutout_juno_url" --limit 1000
 ```
 
@@ -240,23 +241,23 @@ with AgirDB.connect(
     table="semif",
 ) as db:
     # Filters: keyword arguments (AND; a list means OR), and where() for expressions
-    query = db.filter(category_usda_symbol="HOVU", is_primary=1).where("cutout_juno_url IS NOT NULL")
+    query = db.filter(category_usda_symbol="GLMA4", is_primary=1).where("cutout_juno_url IS NOT NULL")
     print(query.count())
 
     for record in query.limit(5).all():
         print(record.cutout_id, record.extras["cutout_juno_url"])
 
     # Sampling
-    seeded = db.filter(category_usda_symbol="HOVU").sample_seeded(200, seed=42).all()
+    seeded = db.filter(category_usda_symbol="GLMA4").sample_seeded(200, seed=42).all()
     balanced = (
-        db.filter(category_usda_symbol=["HOVU", "PISA6"], is_primary=1)
+        db.filter(category_usda_symbol=["GLMA4", "ZEA"], is_primary=1)
         .where("cutout_juno_url IS NOT NULL")
         .sample_stratified(by=["category_common_name", "estimated_area_bin"], per_group=5)
         .all()
     )
 
     # Sorting and paging
-    page2 = db.filter(category_usda_symbol="HOVU").sort("batch_id", "desc").limit(50).offset(50).all()
+    page2 = db.filter(category_usda_symbol="GLMA4").sort("batch_id", "desc").limit(50).offset(50).all()
 ```
 
 Each builder call changes the query it is called on, so start a fresh `db.filter(...)` for each query.
@@ -270,7 +271,7 @@ Each builder call changes the query it is called on, so start a fresh `db.filter
 | Type | Syntax | Example |
 |:-----|:-------|:--------|
 | Equals | `field=value` | `state=NC` |
-| Any of (OR) | `field=a,b` | `category_usda_symbol=HOVU,SECE` |
+| Any of (OR) | `field=a,b` | `category_usda_symbol=GLMA4,ZEA` |
 | All of (AND) | repeat `--filters` | `--filters "state=NC" --filters "is_primary=1"` |
 | Greater / less | `field>=value`, `field<=value` | `estimated_bbox_area_cm2>=50` |
 | NULL check | `field is null`, `field is not null` | `cutout_juno_url is not null` |

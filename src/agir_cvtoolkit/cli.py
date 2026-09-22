@@ -178,9 +178,14 @@ def scinet_transfer(
 
     from agir_cvtoolkit.pipelines.stages.scinet_transfer import (
         SciNetTransferStage,
+        _collect_run_folder_pairs,
+        _explain_no_paths,
         _extract_transfer_paths,
+        _globus_folder_url,
+        _landing_folder,
         _load_records,
         _resolve_destination,
+        _scoped_dst_root,
     )
 
     # Validate the destination name early so dry-run also catches typos
@@ -190,9 +195,14 @@ def scinet_transfer(
     if not submit:
         from pathlib import Path as _Path
 
-        run_root    = _Path(cfg_dict["paths"]["run_root"])
-        path_columns = globus_cfg.get("path_columns", [])
-        src_root_val = globus_cfg.get("src_root", "")
+        run_root       = _Path(cfg_dict["paths"]["run_root"])
+        path_columns   = globus_cfg.get("path_columns", [])
+        src_root_val   = globus_cfg.get("src_root", "")
+        run_id         = cfg_dict.get("runtime", {}).get("run_id")
+        local_endpoint = globus_cfg.get("local_endpoint")
+        # Namespace the shared destination root by this run's project/subname,
+        # exactly as --submit does, so the dry-run previews the real location.
+        dst_root_scoped = _scoped_dst_root(dst_root_val, run_id)
 
         try:
             records = _load_records(run_root)
@@ -206,14 +216,34 @@ def scinet_transfer(
             f"  src endpoint : {globus_cfg.get('juno_endpoint')}  (juno)\n"
             f"  dst endpoint : {dst_endpoint}  ({dst_name})\n"
             f"  src_root     : {src_root_val}\n"
-            f"  dst_root     : {dst_root_val}\n"
+            f"  dst_root     : {dst_root_val}  (shared)\n"
+            f"  run folder   : {dst_root_scoped}\n"
         )
         if pairs:
-            typer.echo("First 10 source paths:")
+            folder = _landing_folder(pairs, dst_root_scoped)
+            typer.echo(f"Files would land in: {folder}  (on {dst_name})")
+            link = _globus_folder_url(dst_endpoint, folder)
+            if link:
+                typer.echo(f"Globus link to that folder: {link}")
+            typer.echo("\nFirst 10 source paths:")
             for src, _ in pairs[:10]:
                 typer.echo(f"  {src}")
             if len(pairs) > 10:
                 typer.echo(f"  ... and {len(pairs) - 10} more")
+        else:
+            typer.echo(f"Why: {_explain_no_paths(records, path_columns)}")
+
+        run_folder_pairs = _collect_run_folder_pairs(run_root, dst_root_scoped)
+        if local_endpoint:
+            typer.echo(
+                f"\nWould also copy the run folder ({len(run_folder_pairs)} files: "
+                f"logs, query results, cfg.yaml, ...) into: {dst_root_scoped}"
+            )
+        elif run_folder_pairs:
+            typer.echo(
+                f"\nNot copying the run folder ({len(run_folder_pairs)} files) — "
+                "set globus.local_endpoint in conf/globus/default.yaml to enable this."
+            )
         typer.echo(f"\nRe-run with --submit to transfer to {dst_name}.")
         return
 
@@ -226,10 +256,23 @@ def scinet_transfer(
             f"Globus transfer submitted to {dst_name}.\n"
             f"  task_id  : {task_id}\n"
             f"  run_root : {cfg_dict['paths']['run_root']}\n"
-            f"  Monitor  : https://app.globus.org/activity/{task_id}"
+            f"  Monitor  : https://app.globus.org/activity/{task_id}\n"
+            f"  Files land in : {stage.landing_folder}  (on {dst_name})"
         )
+        if stage.landing_url:
+            typer.echo(f"  Open the folder: {stage.landing_url}")
+        if stage.run_folder_task_id:
+            typer.echo(
+                f"  Run folder    : {len(stage.run_folder_pairs)} files copied "
+                f"(task {stage.run_folder_task_id})"
+            )
+        elif stage.run_folder_pairs:
+            typer.echo(
+                f"  Run folder    : {len(stage.run_folder_pairs)} files NOT copied — "
+                "set globus.local_endpoint to enable this."
+            )
     else:
-        typer.echo("No files were transferred (empty query results or no valid paths).")
+        typer.echo("No files were transferred. See the warning above for the reason.")
 
 if __name__ == "__main__":
     app()

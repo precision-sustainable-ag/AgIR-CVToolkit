@@ -7,9 +7,15 @@
 juno_endpoint: # <juno endpoint>   # SCINet-Juno (LTS)
 src_root: "/LTS/project/dash_agir/"
 
+# Endpoint where `agir-cv` runs. Only used to also copy this run's local
+# folder (logs, query results, cfg.yaml, globus_batch.txt) alongside the
+# transferred files. Leave blank to skip; not needed for the data transfer.
+local_endpoint: # <local endpoint you're currently on>
+
 # ---- Named destinations ----
 # Select one at runtime with:  agir-cv scinet-transfer --dst ceres
-# Add new destinations here without touching any Python code.
+# dst_root is shared; agir-cv namespaces it by project.name/subname
+# (conf/config.yaml) to avoid collisions. Add new destinations here.
 destinations:
   ceres:
     endpoint: # <ceres endpoint>   # SCINet-Ceres

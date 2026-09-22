@@ -24,11 +24,13 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import pandas as pd
 
@@ -84,28 +86,55 @@ def _resolve_destination(globus_cfg: dict, dst_name: str) -> Tuple[str, str]:
 
 
 def _load_records(run_root: Path) -> List[Dict]:
-    """Load query records from query.json or query.csv inside *run_root*."""
+    """Load query records from query.json or query.csv inside *run_root*.
+
+    Every query in a project writes to the same run folder, so both files can be
+    present. The one written most recently is the current query and wins; an older
+    file left over from an earlier run must not shadow it.
+    """
     query_json = run_root / "query" / "query.json"
     query_csv  = run_root / "query" / "query.csv"
 
-    if query_json.exists():
-        log.info(f"Loading records from: {query_json}")
-        with open(query_json) as fh:
-            data = json.load(fh)
-    elif query_csv.exists():
-        log.info(f"Loading records from: {query_csv}")
-        df = pd.read_csv(query_csv)
-        df = df.where(pd.notnull(df), None)
-        data = df.to_dict(orient="records")
-    else:
+    existing = [p for p in (query_json, query_csv) if p.exists()]
+    if not existing:
         raise FileNotFoundError(
             f"No query results found under {run_root / 'query'}. "
             "Run 'agir-cv query ...' first."
         )
+    # max() keeps the first of equal times, so query.json still wins a tie
+    chosen = max(existing, key=lambda p: p.stat().st_mtime)
+    log.info(f"Loading records from: {chosen}")
+    if len(existing) == 2:
+        older = query_csv if chosen == query_json else query_json
+        log.info(f"  (ignoring the older {older.name})")
+
+    if chosen == query_json:
+        with open(query_json) as fh:
+            data = json.load(fh)
+    else:
+        df = pd.read_csv(query_csv)
+        df = df.where(pd.notnull(df), None)
+        data = df.to_dict(orient="records")
 
     if not data:
         log.warning("Query results are empty – nothing to transfer.")
     return data
+
+
+_SENTINEL = {"none", "null", "", "nan"}
+
+
+def _is_blank(raw) -> bool:
+    """True for None, NaN and the sentinel strings a CSV/JSON round trip produces."""
+    if raw is None:
+        return True
+    # pandas reads missing CSV cells as float('nan'); NaN is the only value not equal to itself
+    try:
+        if raw != raw:
+            return True
+    except TypeError:
+        pass
+    return str(raw).strip().lower() in _SENTINEL
 
 
 def _extract_transfer_paths(
@@ -121,27 +150,15 @@ def _extract_transfer_paths(
 
     Skips None, float NaN, and sentinel strings. Deduplicates.
     """
-    _SENTINEL = {"none", "null", "", "nan"}
     seen: set[str] = set()
     pairs: List[Tuple[str, str]] = []
 
     for record in records:
         for col in path_columns:
             raw = record.get(col)
-            if raw is None:
+            if _is_blank(raw):
                 continue
-            # pandas reads missing CSV cells as float('nan');
-            # NaN is the only value not equal to itself
-            try:
-                if raw != raw:
-                    continue
-            except TypeError:
-                pass
-            raw_str = str(raw).strip()
-            if raw_str.lower() in _SENTINEL:
-                continue
-
-            rel = raw_str.lstrip("/")
+            rel = str(raw).strip().lstrip("/")
             src = str(Path(src_root) / rel)
 
             if src in seen:
@@ -150,6 +167,88 @@ def _extract_transfer_paths(
             pairs.append((src, rel))
 
     return pairs
+
+
+def _explain_no_paths(records: List[Dict], path_columns: List[str]) -> str:
+    """Say why a query produced no transferable file paths, and what to change."""
+    if not records:
+        return "The query returned no rows."
+    cols = ", ".join(path_columns)
+    present = [c for c in path_columns if any(c in r for r in records)]
+    if not present:
+        return (
+            f"None of the path columns ({cols}) are in the query results. "
+            "This usually means the query used --projection without them. "
+            "Re-run the query without --projection, or include those columns."
+        )
+    hint = 'Add --filters "cutout_juno_url is not null" to select rows that have cutouts.'
+    if all(_is_blank(r.get("cutout_id")) for r in records):
+        return (
+            f"All {len(records)} rows have empty cutout paths, and an empty cutout_id too. "
+            "They look like zero-detection rows (images with no detections), which a plain "
+            f"query returns first. {hint}"
+        )
+    return f"All {len(records)} rows have empty cutout paths ({', '.join(present)}). {hint}"
+
+
+def _scoped_dst_root(dst_root: str, run_id: Optional[str]) -> str:
+    """
+    Namespace a shared destination root by the current run's project/subname,
+    e.g. ``/90daydata/dash_agir/tmp/`` + run_id ``test/001`` ->
+    ``/90daydata/dash_agir/tmp/test/001/``.
+
+    *run_id* is ``cfg["runtime"]["run_id"]``, the same value the query stage
+    uses to build the local ``outputs/runs/<run_id>/`` folder (see
+    ``_make_run_id`` in hydra_utils.py: ``<project.name>/<project.subname>``
+    when both are set). Without this, transfers from different projects or
+    users would land mixed together under the same shared *dst_root*.
+    """
+    root = dst_root.rstrip("/") + "/"
+    if not run_id:
+        return root
+    return root + str(run_id).strip("/") + "/"
+
+
+def _landing_folder(pairs: List[Tuple[str, str]], dst_root: str) -> str:
+    """Deepest destination folder that holds every file (dst_root if there are none)."""
+    if not pairs:
+        return dst_root
+    dirs = [str(PurePosixPath(dst_root) / PurePosixPath(rel).parent) for _, rel in pairs]
+    return posixpath.commonpath(dirs).rstrip("/") + "/"
+
+
+def _globus_folder_url(endpoint: Optional[str], path: str) -> Optional[str]:
+    """Globus web-app link that opens *path* on *endpoint*; None if no endpoint is set."""
+    if not endpoint:
+        return None
+    return (
+        "https://app.globus.org/file-manager"
+        f"?origin_id={endpoint}&origin_path={quote(path, safe='')}"
+    )
+
+
+def _collect_run_folder_pairs(run_root: Path, dst_root: str) -> List[Tuple[str, str]]:
+    """
+    Pair every file under *run_root* (logs, query results, cfg.yaml, and once
+    written, globus_batch.txt and the manifest) with where it should land
+    under *dst_root*, preserving the same relative layout as the local
+    outputs/runs/<run_id>/ folder.
+
+    *run_root* is resolved to an absolute path first: ``cfg["paths"]["run_root"]``
+    is normally relative (io.out_root defaults to "outputs/runs"), and Globus has
+    no notion of "the directory agir-cv happened to run from" — a relative source
+    path is read against the endpoint's home directory instead, which fails with
+    a PATH_NOT_FOUND / "Directory List / File Scan" error on a path like
+    ``/~/outputs/runs/<run_id>/...``.
+    """
+    run_root = run_root.resolve()
+    if not run_root.is_dir():
+        return []
+    return [
+        (str(path), path.relative_to(run_root).as_posix())
+        for path in sorted(run_root.rglob("*"))
+        if path.is_file()
+    ]
 
 
 def _build_batch_file(
@@ -200,7 +299,11 @@ class SciNetTransferStage:
         self.dst_endpoint, dst_root_raw = _resolve_destination(
             self.globus_cfg, self.dst_name
         )
-        self.dst_root: str = dst_root_raw.rstrip("/") + "/"
+        # e.g. /90daydata/dash_agir/tmp/  ->  /90daydata/dash_agir/tmp/<project.name>/<project.subname>/
+        # so different projects/users sharing dst_root don't land in the same folder.
+        self.run_id: Optional[str] = cfg.get("runtime", {}).get("run_id")
+        self.dst_root_shared: str = dst_root_raw.rstrip("/") + "/"
+        self.dst_root: str = _scoped_dst_root(dst_root_raw, self.run_id)
 
         transfer_opts = self.globus_cfg.get("transfer", {})
         self.sync_level: str    = transfer_opts.get("sync_level", "checksum")
@@ -208,6 +311,17 @@ class SciNetTransferStage:
         self.wait: bool         = bool(transfer_opts.get("wait", False))
         self.poll_interval: int = int(transfer_opts.get("poll_interval_s", 10))
         self.timeout: int       = int(transfer_opts.get("timeout_s", 300))
+
+        # Endpoint for wherever `agir-cv` runs, used only to copy the run folder
+        # (logs, query results, cfg.yaml, ...) alongside the transferred files.
+        self.local_endpoint: Optional[str] = self.globus_cfg.get("local_endpoint") or None
+
+        # filled in by run(): where the files will land, and a Globus link to that folder
+        self.landing_folder: Optional[str] = None
+        self.landing_url: Optional[str] = None
+        # filled in by _copy_run_folder(): the run's own files (logs, query, cfg.yaml, ...)
+        self.run_folder_pairs: List[Tuple[str, str]] = []
+        self.run_folder_task_id: Optional[str] = None
 
         self.path_columns: List[str] = self.globus_cfg.get(
             "path_columns",
@@ -230,7 +344,8 @@ class SciNetTransferStage:
         log.info(f"  src endpoint : {self.juno_endpoint}  (Juno)")
         log.info(f"  dst endpoint : {self.dst_endpoint}  ({self.dst_name})")
         log.info(f"  src_root     : {self.src_root}")
-        log.info(f"  dst_root     : {self.dst_root}")
+        log.info(f"  dst_root     : {self.dst_root_shared}  (shared)")
+        log.info(f"  run folder   : {self.dst_root}")
         log.info("=" * 60)
 
         _require_globus_cli()
@@ -248,10 +363,14 @@ class SciNetTransferStage:
 
         if not pairs:
             log.warning(
-                "No valid file paths found in query results. "
-                "Check that path_columns match your DB schema."
+                "No file paths found in the query results: "
+                + _explain_no_paths(records, self.path_columns)
             )
             return None
+
+        self.landing_folder = _landing_folder(pairs, self.dst_root)
+        self.landing_url = _globus_folder_url(self.dst_endpoint, self.landing_folder)
+        log.info(f"Files will land in: {self.landing_folder}  (on {self.dst_name})")
 
         batch_path = self.run_root / "globus_batch.txt"
         _build_batch_file(pairs, self.dst_root, batch_path)
@@ -265,6 +384,8 @@ class SciNetTransferStage:
                     "dst_endpoint":  self.dst_endpoint,
                     "src_root":      self.src_root,
                     "dst_root":      self.dst_root,
+                    "dst_root_shared": self.dst_root_shared,
+                    "project_run_id": self.run_id,
                     "sync_level":    self.sync_level,
                     "num_items":     len(pairs),
                     "batch_file":    str(batch_path),
@@ -279,6 +400,8 @@ class SciNetTransferStage:
 
         if self.wait:
             self._wait_for_task(task_id)
+
+        self._copy_run_folder()
 
         return task_id
 
@@ -297,16 +420,23 @@ class SciNetTransferStage:
             )
         log.debug(f"Globus session OK: {result.stdout.strip()[:120]}")
 
-    def _submit_transfer(self, batch_path: Path) -> str:
-        """Call ``globus transfer --batch`` and return the task ID."""
+    def _submit_transfer(
+        self, batch_path: Path, *, src_endpoint: Optional[str] = None, label_suffix: str = ""
+    ) -> str:
+        """Call ``globus transfer --batch`` and return the task ID.
+
+        *src_endpoint* defaults to Juno; the run-folder copy passes
+        ``self.local_endpoint`` instead.
+        """
         label = (
             f"{self.label_prefix} "
             f"dst={self.dst_name} "
             f"run={self.cfg.get('runtime', {}).get('run_id', 'unknown')}"
+            f"{f' ({label_suffix})' if label_suffix else ''}"
         )
         args = [
             "transfer",
-            self.juno_endpoint,
+            src_endpoint or self.juno_endpoint,
             self.dst_endpoint,
             "--batch", str(batch_path),
             "--label", label,
@@ -322,6 +452,41 @@ class SciNetTransferStage:
                 f"stdout: {result.stdout}\nstderr: {result.stderr}"
             ) from exc
         return task_id
+
+    def _copy_run_folder(self) -> None:
+        """
+        Copy this run's local folder (logs, query results, cfg.yaml, and the
+        batch file / manifest just written for the data transfer) into the
+        same project folder on the destination, mirroring the local
+        outputs/runs/<run_id>/ layout under dst_root.
+
+        Requires globus.local_endpoint (the endpoint for wherever `agir-cv`
+        runs); skipped with a log message if that isn't configured.
+        """
+        pairs = _collect_run_folder_pairs(self.run_root, self.dst_root)
+        self.run_folder_pairs = pairs
+        if not pairs:
+            return
+
+        if not self.local_endpoint:
+            log.info(
+                f"Not copying the run folder ({len(pairs)} files: logs, query "
+                "results, cfg.yaml, ...): set globus.local_endpoint in "
+                "conf/globus/default.yaml to enable this."
+            )
+            return
+
+        batch_path = self.run_root / "run_folder_batch.txt"
+        _build_batch_file(pairs, self.dst_root, batch_path)
+        log.info(f"Copying {len(pairs)} run-folder files to {self.dst_root}")
+
+        self.run_folder_task_id = self._submit_transfer(
+            batch_path, src_endpoint=self.local_endpoint, label_suffix="run folder"
+        )
+        log.info(f"Run-folder copy task submitted: {self.run_folder_task_id}")
+
+        if self.wait:
+            self._wait_for_task(self.run_folder_task_id)
 
     def _wait_for_task(self, task_id: str) -> None:
         """Poll ``globus task show`` until terminal state or timeout."""
