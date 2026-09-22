@@ -7,6 +7,7 @@ Globus CLI calls are monkey-patched so no real credentials are needed.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -16,7 +17,10 @@ import pytest
 from agir_cvtoolkit.pipelines.stages.scinet_transfer import (
     SciNetTransferStage,
     _build_batch_file,
+    _explain_no_paths,
     _extract_transfer_paths,
+    _globus_folder_url,
+    _landing_folder,
     _load_records,
     _resolve_destination,
 )
@@ -282,3 +286,143 @@ def test_stage_raises_if_not_logged_in(cfg: dict, query_dir: Path) -> None:
 def test_stage_raises_on_unknown_dst(cfg: dict) -> None:
     with pytest.raises(ValueError, match="Unknown destination 'jupiter'"):
         SciNetTransferStage(cfg, dst_name="jupiter")
+
+
+# ---------------------------------------------------------------------------
+# _load_records: the newest results file wins
+# ---------------------------------------------------------------------------
+
+def _write_both(query_dir: Path, json_mtime: int, csv_mtime: int) -> None:
+    """query.json holds 3 records, query.csv holds 1, with the given modification times."""
+    import pandas as pd
+    (query_dir / "query.json").write_text(json.dumps(RECORDS))
+    pd.DataFrame(RECORDS[:1]).to_csv(query_dir / "query.csv", index=False)
+    os.utime(query_dir / "query.json", (json_mtime, json_mtime))
+    os.utime(query_dir / "query.csv", (csv_mtime, csv_mtime))
+
+
+def test_load_records_newer_csv_beats_stale_json(query_dir: Path, tmp_path: Path) -> None:
+    _write_both(query_dir, json_mtime=1_000_000, csv_mtime=2_000_000)
+    assert len(_load_records(tmp_path)) == 1          # the csv, not the old json
+
+
+def test_load_records_newer_json_beats_stale_csv(query_dir: Path, tmp_path: Path) -> None:
+    _write_both(query_dir, json_mtime=2_000_000, csv_mtime=1_000_000)
+    assert len(_load_records(tmp_path)) == 3          # the json
+
+
+def test_load_records_tie_keeps_json_first(query_dir: Path, tmp_path: Path) -> None:
+    _write_both(query_dir, json_mtime=1_500_000, csv_mtime=1_500_000)
+    assert len(_load_records(tmp_path)) == 3
+
+
+# ---------------------------------------------------------------------------
+# _explain_no_paths
+# ---------------------------------------------------------------------------
+
+CUTOUT_COLUMNS = ["cropout_path", "cutout_path", "cutout_mask_path", "cutout_json_path"]
+
+
+def test_explain_no_rows() -> None:
+    assert "no rows" in _explain_no_paths([], CUTOUT_COLUMNS)
+
+
+def test_explain_projection_dropped_the_columns() -> None:
+    msg = _explain_no_paths([{"cutout_id": "A_0"}, {"cutout_id": "A_1"}], CUTOUT_COLUMNS)
+    assert "--projection" in msg
+    assert "cutout_path" in msg
+
+
+def test_explain_zero_detection_rows() -> None:
+    rows = [{"cutout_id": None, "cutout_path": None, "cropout_path": float("nan")} for _ in range(3)]
+    msg = _explain_no_paths(rows, CUTOUT_COLUMNS)
+    assert "zero-detection" in msg
+    assert 'cutout_juno_url is not null' in msg
+
+
+def test_explain_empty_paths_but_real_cutout_ids() -> None:
+    rows = [{"cutout_id": "A_0", "cutout_path": None}, {"cutout_id": "A_1", "cutout_path": ""}]
+    msg = _explain_no_paths(rows, CUTOUT_COLUMNS)
+    assert "zero-detection" not in msg
+    assert "empty cutout paths" in msg
+
+
+# ---------------------------------------------------------------------------
+# _landing_folder / _globus_folder_url
+# ---------------------------------------------------------------------------
+
+DST_ROOT = "/90daydata/dash_agir/tmp/"
+
+
+def _pairs(*rels: str):
+    return [(SRC_ROOT + r, r) for r in rels]
+
+
+def test_landing_folder_single_batch() -> None:
+    pairs = _pairs("semifield-cutouts/NC_2023-07-11/a.png", "semifield-cutouts/NC_2023-07-11/a.json")
+    assert _landing_folder(pairs, DST_ROOT) == "/90daydata/dash_agir/tmp/semifield-cutouts/NC_2023-07-11/"
+
+
+def test_landing_folder_several_batches_uses_shared_parent() -> None:
+    pairs = _pairs("semifield-cutouts/NC_2023-07-11/a.png", "semifield-cutouts/MD_2022-06-24/b.png")
+    assert _landing_folder(pairs, DST_ROOT) == "/90daydata/dash_agir/tmp/semifield-cutouts/"
+
+
+def test_landing_folder_files_at_the_root() -> None:
+    assert _landing_folder(_pairs("a.png"), DST_ROOT) == "/90daydata/dash_agir/tmp/"
+
+
+def test_landing_folder_no_files_falls_back_to_dst_root() -> None:
+    assert _landing_folder([], DST_ROOT) == DST_ROOT
+
+
+def test_globus_folder_url_encodes_the_path() -> None:
+    url = _globus_folder_url("EP-1", "/90daydata/dash_agir/tmp/semifield-cutouts/")
+    assert url == ("https://app.globus.org/file-manager?origin_id=EP-1"
+                   "&origin_path=%2F90daydata%2Fdash_agir%2Ftmp%2Fsemifield-cutouts%2F")
+
+
+def test_globus_folder_url_without_endpoint_is_none() -> None:
+    assert _globus_folder_url(None, DST_ROOT) is None
+    assert _globus_folder_url("", DST_ROOT) is None
+
+
+# ---------------------------------------------------------------------------
+# Stage: landing folder follows the destination; zero files explains itself
+# ---------------------------------------------------------------------------
+
+LANDING_RECORDS = [
+    {"cutout_id": "NC_1_0", "image_path": "semifield-cutouts/NC_2023-07-11/NC_1_0.png"},
+    {"cutout_id": "NC_1_1", "image_path": "semifield-cutouts/NC_2023-07-11/NC_1_1.png"},
+]
+
+
+@pytest.mark.parametrize("dst", ["ceres", "atlas"])
+def test_stage_landing_url_points_at_the_chosen_destination(
+    cfg: dict, query_dir: Path, dst: str
+) -> None:
+    (query_dir / "query.json").write_text(json.dumps(LANDING_RECORDS))
+    with patch("agir_cvtoolkit.pipelines.stages.scinet_transfer._run_globus",
+               side_effect=_mock_run_globus), \
+         patch("agir_cvtoolkit.pipelines.stages.scinet_transfer._require_globus_cli",
+               return_value="/usr/bin/globus"):
+        stage = SciNetTransferStage(cfg, dst_name=dst)
+        stage.run()
+
+    assert stage.landing_folder == "/90daydata/dash_agir/tmp/semifield-cutouts/NC_2023-07-11/"
+    assert f"origin_id={DESTINATIONS[dst]['endpoint']}" in stage.landing_url
+    other = "atlas" if dst == "ceres" else "ceres"
+    assert DESTINATIONS[other]["endpoint"] not in stage.landing_url
+
+
+def test_stage_zero_paths_logs_the_reason(cfg: dict, query_dir: Path, caplog) -> None:
+    placeholders = [{"cutout_id": None, "image_path": None} for _ in range(3)]
+    (query_dir / "query.json").write_text(json.dumps(placeholders))
+    with patch("agir_cvtoolkit.pipelines.stages.scinet_transfer._run_globus",
+               side_effect=_mock_run_globus), \
+         patch("agir_cvtoolkit.pipelines.stages.scinet_transfer._require_globus_cli",
+               return_value="/usr/bin/globus"):
+        with caplog.at_level("WARNING"):
+            assert SciNetTransferStage(cfg).run() is None
+    assert "zero-detection" in caplog.text
+

@@ -24,11 +24,13 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import pandas as pd
 
@@ -84,28 +86,55 @@ def _resolve_destination(globus_cfg: dict, dst_name: str) -> Tuple[str, str]:
 
 
 def _load_records(run_root: Path) -> List[Dict]:
-    """Load query records from query.json or query.csv inside *run_root*."""
+    """Load query records from query.json or query.csv inside *run_root*.
+
+    Every query in a project writes to the same run folder, so both files can be
+    present. The one written most recently is the current query and wins; an older
+    file left over from an earlier run must not shadow it.
+    """
     query_json = run_root / "query" / "query.json"
     query_csv  = run_root / "query" / "query.csv"
 
-    if query_json.exists():
-        log.info(f"Loading records from: {query_json}")
-        with open(query_json) as fh:
-            data = json.load(fh)
-    elif query_csv.exists():
-        log.info(f"Loading records from: {query_csv}")
-        df = pd.read_csv(query_csv)
-        df = df.where(pd.notnull(df), None)
-        data = df.to_dict(orient="records")
-    else:
+    existing = [p for p in (query_json, query_csv) if p.exists()]
+    if not existing:
         raise FileNotFoundError(
             f"No query results found under {run_root / 'query'}. "
             "Run 'agir-cv query ...' first."
         )
+    # max() keeps the first of equal times, so query.json still wins a tie
+    chosen = max(existing, key=lambda p: p.stat().st_mtime)
+    log.info(f"Loading records from: {chosen}")
+    if len(existing) == 2:
+        older = query_csv if chosen == query_json else query_json
+        log.info(f"  (ignoring the older {older.name})")
+
+    if chosen == query_json:
+        with open(query_json) as fh:
+            data = json.load(fh)
+    else:
+        df = pd.read_csv(query_csv)
+        df = df.where(pd.notnull(df), None)
+        data = df.to_dict(orient="records")
 
     if not data:
         log.warning("Query results are empty – nothing to transfer.")
     return data
+
+
+_SENTINEL = {"none", "null", "", "nan"}
+
+
+def _is_blank(raw) -> bool:
+    """True for None, NaN and the sentinel strings a CSV/JSON round trip produces."""
+    if raw is None:
+        return True
+    # pandas reads missing CSV cells as float('nan'); NaN is the only value not equal to itself
+    try:
+        if raw != raw:
+            return True
+    except TypeError:
+        pass
+    return str(raw).strip().lower() in _SENTINEL
 
 
 def _extract_transfer_paths(
@@ -121,27 +150,15 @@ def _extract_transfer_paths(
 
     Skips None, float NaN, and sentinel strings. Deduplicates.
     """
-    _SENTINEL = {"none", "null", "", "nan"}
     seen: set[str] = set()
     pairs: List[Tuple[str, str]] = []
 
     for record in records:
         for col in path_columns:
             raw = record.get(col)
-            if raw is None:
+            if _is_blank(raw):
                 continue
-            # pandas reads missing CSV cells as float('nan');
-            # NaN is the only value not equal to itself
-            try:
-                if raw != raw:
-                    continue
-            except TypeError:
-                pass
-            raw_str = str(raw).strip()
-            if raw_str.lower() in _SENTINEL:
-                continue
-
-            rel = raw_str.lstrip("/")
+            rel = str(raw).strip().lstrip("/")
             src = str(Path(src_root) / rel)
 
             if src in seen:
@@ -150,6 +167,46 @@ def _extract_transfer_paths(
             pairs.append((src, rel))
 
     return pairs
+
+
+def _explain_no_paths(records: List[Dict], path_columns: List[str]) -> str:
+    """Say why a query produced no transferable file paths, and what to change."""
+    if not records:
+        return "The query returned no rows."
+    cols = ", ".join(path_columns)
+    present = [c for c in path_columns if any(c in r for r in records)]
+    if not present:
+        return (
+            f"None of the path columns ({cols}) are in the query results. "
+            "This usually means the query used --projection without them. "
+            "Re-run the query without --projection, or include those columns."
+        )
+    hint = 'Add --filters "cutout_juno_url is not null" to select rows that have cutouts.'
+    if all(_is_blank(r.get("cutout_id")) for r in records):
+        return (
+            f"All {len(records)} rows have empty cutout paths, and an empty cutout_id too. "
+            "They look like zero-detection rows (images with no detections), which a plain "
+            f"query returns first. {hint}"
+        )
+    return f"All {len(records)} rows have empty cutout paths ({', '.join(present)}). {hint}"
+
+
+def _landing_folder(pairs: List[Tuple[str, str]], dst_root: str) -> str:
+    """Deepest destination folder that holds every file (dst_root if there are none)."""
+    if not pairs:
+        return dst_root
+    dirs = [str(PurePosixPath(dst_root) / PurePosixPath(rel).parent) for _, rel in pairs]
+    return posixpath.commonpath(dirs).rstrip("/") + "/"
+
+
+def _globus_folder_url(endpoint: Optional[str], path: str) -> Optional[str]:
+    """Globus web-app link that opens *path* on *endpoint*; None if no endpoint is set."""
+    if not endpoint:
+        return None
+    return (
+        "https://app.globus.org/file-manager"
+        f"?origin_id={endpoint}&origin_path={quote(path, safe='')}"
+    )
 
 
 def _build_batch_file(
@@ -209,6 +266,10 @@ class SciNetTransferStage:
         self.poll_interval: int = int(transfer_opts.get("poll_interval_s", 10))
         self.timeout: int       = int(transfer_opts.get("timeout_s", 300))
 
+        # filled in by run(): where the files will land, and a Globus link to that folder
+        self.landing_folder: Optional[str] = None
+        self.landing_url: Optional[str] = None
+
         self.path_columns: List[str] = self.globus_cfg.get(
             "path_columns",
             [
@@ -248,10 +309,14 @@ class SciNetTransferStage:
 
         if not pairs:
             log.warning(
-                "No valid file paths found in query results. "
-                "Check that path_columns match your DB schema."
+                "No file paths found in the query results: "
+                + _explain_no_paths(records, self.path_columns)
             )
             return None
+
+        self.landing_folder = _landing_folder(pairs, self.dst_root)
+        self.landing_url = _globus_folder_url(self.dst_endpoint, self.landing_folder)
+        log.info(f"Files will land in: {self.landing_folder}  (on {self.dst_name})")
 
         batch_path = self.run_root / "globus_batch.txt"
         _build_batch_file(pairs, self.dst_root, batch_path)

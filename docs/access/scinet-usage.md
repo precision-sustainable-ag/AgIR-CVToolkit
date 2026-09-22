@@ -79,7 +79,7 @@ agir-cv query --db semif --preview 5 --limit 5
 **Transfer**
 
 ```bash
-# Dry run: lists the files, submits nothing
+# Dry run: lists the files and where they would land, submits nothing
 agir-cv scinet-transfer
 
 # Start the transfer to Ceres (the default destination)
@@ -89,14 +89,23 @@ agir-cv scinet-transfer --submit
 agir-cv scinet-transfer --dst atlas --submit
 ```
 
+Both the dry run and `--submit` print the destination folder the files land in (or would land in), and a Globus link that opens that folder for the destination you picked:
+
+```
+Files would land in: /90daydata/dash_agir/tmp/semifield-cutouts/NC_2023-07-11/  (on ceres)
+Globus link to that folder: https://app.globus.org/file-manager?origin_id=...&origin_path=...
+```
+
+Each file keeps its path from the database under the destination's root, so a query spanning several batches lands in `.../semifield-cutouts/` with one subfolder per batch, and a single-batch query lands directly in that batch's folder.
+
 {: .tip }
-> Add `--filters "cutout_juno_url is not null"` to the query you transfer from. The transfer lists the four file paths of every row, so rows without cutouts would ask for files that do not exist.
+> Add `--filters "cutout_juno_url is not null"` to the query you transfer from. The transfer lists the four file paths of every row, so rows without cutouts would ask for files that do not exist. If a query does return rows with no file paths, `scinet-transfer` says why (for example, that the rows look like zero-detection placeholder rows) instead of transferring nothing silently.
 
 {: .warning }
 > Do not use `--projection` on the query you transfer from. The transfer reads the path columns (`cropout_path`, `cutout_path`, `cutout_mask_path`, `cutout_json_path`), and a query without them transfers **0 files**. If you do use `--projection`, include those four columns.
 
 {: .note }
-> The transfer reads `outputs/runs/<project>/<subname>/query/query.json` if it exists, and otherwise `query.csv`. If you change output formats between queries, delete the old file so you do not transfer the previous query.
+> The transfer reads whichever of `outputs/runs/<project>/<subname>/query/query.json` and `query.csv` was written most recently, so an older file left over from a previous query never shadows your latest one.
 
 To fetch just a few files yourself, each row also has direct download links in `cutout_juno_url` and its sibling columns.
 

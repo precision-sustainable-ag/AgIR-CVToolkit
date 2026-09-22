@@ -178,7 +178,10 @@ def scinet_transfer(
 
     from agir_cvtoolkit.pipelines.stages.scinet_transfer import (
         SciNetTransferStage,
+        _explain_no_paths,
         _extract_transfer_paths,
+        _globus_folder_url,
+        _landing_folder,
         _load_records,
         _resolve_destination,
     )
@@ -209,11 +212,18 @@ def scinet_transfer(
             f"  dst_root     : {dst_root_val}\n"
         )
         if pairs:
-            typer.echo("First 10 source paths:")
+            folder = _landing_folder(pairs, dst_root_val)
+            typer.echo(f"Files would land in: {folder}  (on {dst_name})")
+            link = _globus_folder_url(dst_endpoint, folder)
+            if link:
+                typer.echo(f"Globus link to that folder: {link}")
+            typer.echo("\nFirst 10 source paths:")
             for src, _ in pairs[:10]:
                 typer.echo(f"  {src}")
             if len(pairs) > 10:
                 typer.echo(f"  ... and {len(pairs) - 10} more")
+        else:
+            typer.echo(f"Why: {_explain_no_paths(records, path_columns)}")
         typer.echo(f"\nRe-run with --submit to transfer to {dst_name}.")
         return
 
@@ -226,10 +236,13 @@ def scinet_transfer(
             f"Globus transfer submitted to {dst_name}.\n"
             f"  task_id  : {task_id}\n"
             f"  run_root : {cfg_dict['paths']['run_root']}\n"
-            f"  Monitor  : https://app.globus.org/activity/{task_id}"
+            f"  Monitor  : https://app.globus.org/activity/{task_id}\n"
+            f"  Files land in : {stage.landing_folder}  (on {dst_name})"
         )
+        if stage.landing_url:
+            typer.echo(f"  Open the folder: {stage.landing_url}")
     else:
-        typer.echo("No files were transferred (empty query results or no valid paths).")
+        typer.echo("No files were transferred. See the warning above for the reason.")
 
 if __name__ == "__main__":
     app()
