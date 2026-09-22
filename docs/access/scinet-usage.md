@@ -23,7 +23,7 @@ The AgIR database and its cutout files live on **Juno LTS**. On SciNet you will:
 4. Transfer the files for your query with Globus (section 2 below)
 
 {: .tip }
-> uv keeps its download cache in `~/.cache/uv`, and home quotas on SciNet are small. Before running `uv sync`, set `export UV_CACHE_DIR=/project/<your_project>/uv-cache`.
+> uv keeps its download cache in `~/.cache/uv`, and home quotas on SciNet are small. Before running `uv sync`, set `export UV_CACHE_DIR=/project/<your_project>/<your_name>/uv-cache`.
 
 ---
 
@@ -32,7 +32,7 @@ The AgIR database and its cutout files live on **Juno LTS**. On SciNet you will:
 {: .tip }
 > If you are in the `dash_agir` project on Ceres, the database is already at `/project/dash_agir/semifield-database/AgIR_DB_v2_0_202609.db`. Point the toolkit at it (see [Installation](installation.html#point-the-toolkit-at-the-database)) and skip the copy.
 
-Otherwise, copy it from Juno LTS. It is in `/LTS/project/dash_agir/semifield-database/`, and the file is about {{ site.data.db_stats.database.size_gb }} GB.
+Otherwise, copy it from Juno LTS to your desired location (don't forget to update the configs. The file is about {{ site.data.db_stats.database.size_gb }} GB.
 
 **Option A: Globus web UI** (easiest)
 
