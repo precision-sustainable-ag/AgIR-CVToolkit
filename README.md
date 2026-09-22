@@ -8,8 +8,8 @@ Agricultural Image Repository Computer Vision Toolkit - query the SemiF and Fiel
 # Install (uv creates .venv and installs Python 3.13 if needed: https://docs.astral.sh/uv/)
 uv sync
 
-# Query database
-uv run agir-cv query --db semif --filters "state=NC" --limit 100
+# Query database: big soybean cutouts (USDA symbol GLMA4)
+uv run agir-cv query --db semif --filters "category_usda_symbol=GLMA4" --filters "estimated_area_bin=1000-5000,5000-10000,10000+" --limit 100
 
 # Fetch the files for the last query from Juno (dry-run unless --submit is given)
 uv run agir-cv scinet-transfer
