@@ -45,9 +45,6 @@ Examples write `agir-cv ...`. Prefix them with `uv run` if you have not activate
 ## Quick Start
 
 ```bash
-# Look at 5 records
-agir-cv query --db semif --preview 5 --limit 5
-
 # Big primary cutouts of soybean (USDA symbol GLMA4)
 agir-cv query --db semif \
   --filters "category_usda_symbol=GLMA4" \

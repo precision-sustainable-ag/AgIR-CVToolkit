@@ -84,7 +84,9 @@ agir-cv query --db semif \
    globus session update --all
    ```
 
-2. Fill in the endpoint IDs in `src/agir_cvtoolkit/conf/globus/default.yaml`: `juno_endpoint`, and `endpoint` under `destinations.ceres` (and `atlas` if you use it). They are blank in the repository. The same file sets the destination folders.
+2. Point `src/agir_cvtoolkit/conf/globus/default.yaml` at your own setup — it ships with placeholders, not real values:
+   - `juno_endpoint`, and `endpoint` under `destinations.ceres` (and `atlas` if you use it) — blank until you fill them in.
+   - `dst_root` under each destination you use — replace `<your_project>` in `/90daydata/<your_project>/agir_cvtoolkit_runs/` with your own SciNet project. This is a folder you have write access to; it is **not** shared with other AgIR users by default.
 
 3. If you also want the run folder copied alongside the files (see [Where files land](#where-files-land) below), set `local_endpoint` in the same file to the endpoint for wherever you run `agir-cv` (usually `SCINet-Ceres`, the same ID as `destinations.ceres.endpoint`). Leave it blank to skip that copy; the file transfer itself does not need it.
 
@@ -104,13 +106,13 @@ agir-cv scinet-transfer --dst atlas --submit
 Both the dry run and `--submit` print the destination folder the files land in (or would land in), and a Globus link that opens that folder for the destination you picked:
 
 ```
-Files would land in: /90daydata/dash_agir/tmp/demo/big-soy/semifield-cutouts/  (on ceres)
+Files would land in: /90daydata/<your_project>/agir_cvtoolkit_runs/demo/big-soy/semifield-cutouts/  (on ceres)
 Globus link to that folder: https://app.globus.org/file-manager?origin_id=...&origin_path=...
 ```
 
 ### Where files land
 
-The destination folder for each named destination (`ceres`, `atlas`, ...) is a **shared root** — everyone's transfers use the same `dst_root` in `conf/globus/default.yaml`. To keep them apart, `agir-cv` namespaces it by your run's `project.name` and `project.subname` (the same values behind the local `outputs/runs/<project.name>/<project.subname>/` folder):
+`dst_root` (in `conf/globus/default.yaml`, one per named destination) is a single folder — your own SciNet project space, from step 2 above, not shared with other AgIR users. `agir-cv` namespaces it further by your run's `project.name` and `project.subname` (the same values behind the local `outputs/runs/<project.name>/<project.subname>/` folder), so your own different runs and projects don't land in the same folder and overwrite each other:
 
 ```
 <dst_root>/<project.name>/<project.subname>/semifield-cutouts/<batch_id>/<file>

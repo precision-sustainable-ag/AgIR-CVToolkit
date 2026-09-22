@@ -137,7 +137,7 @@ A plain `agir-cv query` only ever writes `query/`, `cfg.yaml` and `logs/`. The o
 
 ## Where Transferred Files Land
 
-`scinet-transfer` copies this same `{project_name}/{subname}` structure onto the destination (Ceres or Atlas), inside a root every project shares (`dst_root` in `conf/globus/default.yaml`):
+`scinet-transfer` copies this same `{project_name}/{subname}` structure onto the destination (Ceres or Atlas), inside the root you configured (`dst_root` in `conf/globus/default.yaml` — your own SciNet project space, not shared with other AgIR users):
 
 ```
 <dst_root>/{project_name}/{subname}/
