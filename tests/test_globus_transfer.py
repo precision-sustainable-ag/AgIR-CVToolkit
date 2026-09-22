@@ -470,6 +470,30 @@ def test_collect_run_folder_pairs_finds_nested_files(tmp_path: Path) -> None:
     assert all(not rel.startswith("/") for rel in rels)
 
 
+def test_collect_run_folder_pairs_source_is_absolute_for_relative_run_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Regression test: cfg["paths"]["run_root"] is normally relative (io.out_root
+    defaults to "outputs/runs"), but Globus has no notion of "wherever agir-cv
+    was run from" -- a relative source path gets read against the endpoint's
+    home directory instead (PATH_NOT_FOUND on "/~/outputs/runs/.../file"), even
+    though the destination side of the same line is a correct absolute path.
+    """
+    (tmp_path / "cfg.yaml").write_text("cfg")
+    monkeypatch.chdir(tmp_path.parent)
+    relative_run_root = Path(tmp_path.name)            # e.g. Path("pytest-xyz"), not absolute
+    assert not relative_run_root.is_absolute()
+
+    pairs = _collect_run_folder_pairs(relative_run_root, "/90daydata/dash_agir/tmp/test/001/")
+
+    assert len(pairs) == 1
+    src, rel = pairs[0]
+    assert rel == "cfg.yaml"                            # dst-side layout is unaffected
+    assert Path(src).is_absolute()
+    assert src == str((tmp_path / "cfg.yaml").resolve())
+
+
 def test_collect_run_folder_pairs_missing_folder_is_empty(tmp_path: Path) -> None:
     assert _collect_run_folder_pairs(tmp_path / "does-not-exist", "/dst/") == []
 

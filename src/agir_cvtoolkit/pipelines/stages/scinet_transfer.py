@@ -233,7 +233,15 @@ def _collect_run_folder_pairs(run_root: Path, dst_root: str) -> List[Tuple[str, 
     written, globus_batch.txt and the manifest) with where it should land
     under *dst_root*, preserving the same relative layout as the local
     outputs/runs/<run_id>/ folder.
+
+    *run_root* is resolved to an absolute path first: ``cfg["paths"]["run_root"]``
+    is normally relative (io.out_root defaults to "outputs/runs"), and Globus has
+    no notion of "the directory agir-cv happened to run from" — a relative source
+    path is read against the endpoint's home directory instead, which fails with
+    a PATH_NOT_FOUND / "Directory List / File Scan" error on a path like
+    ``/~/outputs/runs/<run_id>/...``.
     """
+    run_root = run_root.resolve()
     if not run_root.is_dir():
         return []
     return [

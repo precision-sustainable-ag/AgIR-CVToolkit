@@ -115,16 +115,47 @@ The first query on a large file can take a few seconds while it loads.
 
 ## Output
 
-Each run writes to a standard folder:
+Each run writes to a standard local folder, named after your `project.name` and `project.subname` (`test` / `001` by default — see `conf/config.yaml`, or set your own with `-o project.name=... -o project.subname=...`):
 
 ```
 outputs/runs/{project_name}/{subname}/
 ├── query/
-│   ├── query.csv          # or query.json / query.parquet, per --out
-│   └── query_spec.json    # the exact query, for reproducibility
-├── cfg.yaml               # configuration snapshot
-└── logs/
+│   ├── query.csv                     # or query.json / query.parquet, per --out
+│   └── query_spec.json               # the exact query, for reproducibility
+├── cfg.yaml                          # configuration snapshot
+├── logs/
+├── globus_batch.txt                  # written by `scinet-transfer --submit`
+├── scinet_transfer_manifest.json     # written by `scinet-transfer --submit`
+└── run_folder_batch.txt              # written by `scinet-transfer --submit`, only if globus.local_endpoint is set
 ```
+
+A plain `agir-cv query` only ever writes `query/`, `cfg.yaml` and `logs/`. The other three files show up once you run [`agir-cv scinet-transfer --submit`](scinet-usage.html#2-transfer-the-files).
+
+---
+
+## Where Transferred Files Land
+
+`scinet-transfer` copies this same `{project_name}/{subname}` structure onto the destination (Ceres or Atlas), inside a root every project shares (`dst_root` in `conf/globus/default.yaml`):
+
+```
+<dst_root>/{project_name}/{subname}/
+├── semifield-cutouts/
+│   └── <batch_id>/
+│       ├── <cutout_id>.jpg           # crop
+│       ├── <cutout_id>.png           # cutout
+│       ├── <cutout_id>_mask.png      # mask
+│       └── <cutout_id>.json          # per-cutout metadata
+├── cfg.yaml
+├── logs/
+├── query/
+├── globus_batch.txt
+└── scinet_transfer_manifest.json
+```
+
+- `semifield-cutouts/` always lands here, with one subfolder per batch your query touched — this is the actual data.
+- `cfg.yaml`, `logs/`, `query/`, `globus_batch.txt` and the manifest are your local run folder, mirrored alongside the data. This only happens if `globus.local_endpoint` is set; otherwise `scinet-transfer` copies just the data and tells you how many run-folder files it skipped.
+
+See [SciNet Setup: Where files land](scinet-usage.html#where-files-land) for how to set `globus.local_endpoint` and why the folder is namespaced by project this way.
 
 ---
 
