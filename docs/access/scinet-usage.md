@@ -55,8 +55,10 @@ globus transfer \
 Then set `db_path` as described in [Installation](installation.html#point-the-toolkit-at-the-database) and run a query, for example:
 
 ```bash
-agir-cv query --db semif --preview 5 --limit 5
+agir-cv query --db semif -o project.name=install_test -o project.subname=verify --preview 5 --limit 5
 ```
+
+The `-o project.name=... -o project.subname=...` overrides just keep this sanity check out of the `demo`/`big-soy` folder used for the examples below — drop them and it works the same way.
 
 ---
 
