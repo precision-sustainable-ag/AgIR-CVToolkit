@@ -191,6 +191,24 @@ def _explain_no_paths(records: List[Dict], path_columns: List[str]) -> str:
     return f"All {len(records)} rows have empty cutout paths ({', '.join(present)}). {hint}"
 
 
+def _scoped_dst_root(dst_root: str, run_id: Optional[str]) -> str:
+    """
+    Namespace a shared destination root by the current run's project/subname,
+    e.g. ``/90daydata/dash_agir/tmp/`` + run_id ``test/001`` ->
+    ``/90daydata/dash_agir/tmp/test/001/``.
+
+    *run_id* is ``cfg["runtime"]["run_id"]``, the same value the query stage
+    uses to build the local ``outputs/runs/<run_id>/`` folder (see
+    ``_make_run_id`` in hydra_utils.py: ``<project.name>/<project.subname>``
+    when both are set). Without this, transfers from different projects or
+    users would land mixed together under the same shared *dst_root*.
+    """
+    root = dst_root.rstrip("/") + "/"
+    if not run_id:
+        return root
+    return root + str(run_id).strip("/") + "/"
+
+
 def _landing_folder(pairs: List[Tuple[str, str]], dst_root: str) -> str:
     """Deepest destination folder that holds every file (dst_root if there are none)."""
     if not pairs:
@@ -207,6 +225,22 @@ def _globus_folder_url(endpoint: Optional[str], path: str) -> Optional[str]:
         "https://app.globus.org/file-manager"
         f"?origin_id={endpoint}&origin_path={quote(path, safe='')}"
     )
+
+
+def _collect_run_folder_pairs(run_root: Path, dst_root: str) -> List[Tuple[str, str]]:
+    """
+    Pair every file under *run_root* (logs, query results, cfg.yaml, and once
+    written, globus_batch.txt and the manifest) with where it should land
+    under *dst_root*, preserving the same relative layout as the local
+    outputs/runs/<run_id>/ folder.
+    """
+    if not run_root.is_dir():
+        return []
+    return [
+        (str(path), path.relative_to(run_root).as_posix())
+        for path in sorted(run_root.rglob("*"))
+        if path.is_file()
+    ]
 
 
 def _build_batch_file(
@@ -257,7 +291,11 @@ class SciNetTransferStage:
         self.dst_endpoint, dst_root_raw = _resolve_destination(
             self.globus_cfg, self.dst_name
         )
-        self.dst_root: str = dst_root_raw.rstrip("/") + "/"
+        # e.g. /90daydata/dash_agir/tmp/  ->  /90daydata/dash_agir/tmp/<project.name>/<project.subname>/
+        # so different projects/users sharing dst_root don't land in the same folder.
+        self.run_id: Optional[str] = cfg.get("runtime", {}).get("run_id")
+        self.dst_root_shared: str = dst_root_raw.rstrip("/") + "/"
+        self.dst_root: str = _scoped_dst_root(dst_root_raw, self.run_id)
 
         transfer_opts = self.globus_cfg.get("transfer", {})
         self.sync_level: str    = transfer_opts.get("sync_level", "checksum")
@@ -266,9 +304,16 @@ class SciNetTransferStage:
         self.poll_interval: int = int(transfer_opts.get("poll_interval_s", 10))
         self.timeout: int       = int(transfer_opts.get("timeout_s", 300))
 
+        # Endpoint for wherever `agir-cv` runs, used only to copy the run folder
+        # (logs, query results, cfg.yaml, ...) alongside the transferred files.
+        self.local_endpoint: Optional[str] = self.globus_cfg.get("local_endpoint") or None
+
         # filled in by run(): where the files will land, and a Globus link to that folder
         self.landing_folder: Optional[str] = None
         self.landing_url: Optional[str] = None
+        # filled in by _copy_run_folder(): the run's own files (logs, query, cfg.yaml, ...)
+        self.run_folder_pairs: List[Tuple[str, str]] = []
+        self.run_folder_task_id: Optional[str] = None
 
         self.path_columns: List[str] = self.globus_cfg.get(
             "path_columns",
@@ -291,7 +336,8 @@ class SciNetTransferStage:
         log.info(f"  src endpoint : {self.juno_endpoint}  (Juno)")
         log.info(f"  dst endpoint : {self.dst_endpoint}  ({self.dst_name})")
         log.info(f"  src_root     : {self.src_root}")
-        log.info(f"  dst_root     : {self.dst_root}")
+        log.info(f"  dst_root     : {self.dst_root_shared}  (shared)")
+        log.info(f"  run folder   : {self.dst_root}")
         log.info("=" * 60)
 
         _require_globus_cli()
@@ -330,6 +376,8 @@ class SciNetTransferStage:
                     "dst_endpoint":  self.dst_endpoint,
                     "src_root":      self.src_root,
                     "dst_root":      self.dst_root,
+                    "dst_root_shared": self.dst_root_shared,
+                    "project_run_id": self.run_id,
                     "sync_level":    self.sync_level,
                     "num_items":     len(pairs),
                     "batch_file":    str(batch_path),
@@ -344,6 +392,8 @@ class SciNetTransferStage:
 
         if self.wait:
             self._wait_for_task(task_id)
+
+        self._copy_run_folder()
 
         return task_id
 
@@ -362,16 +412,23 @@ class SciNetTransferStage:
             )
         log.debug(f"Globus session OK: {result.stdout.strip()[:120]}")
 
-    def _submit_transfer(self, batch_path: Path) -> str:
-        """Call ``globus transfer --batch`` and return the task ID."""
+    def _submit_transfer(
+        self, batch_path: Path, *, src_endpoint: Optional[str] = None, label_suffix: str = ""
+    ) -> str:
+        """Call ``globus transfer --batch`` and return the task ID.
+
+        *src_endpoint* defaults to Juno; the run-folder copy passes
+        ``self.local_endpoint`` instead.
+        """
         label = (
             f"{self.label_prefix} "
             f"dst={self.dst_name} "
             f"run={self.cfg.get('runtime', {}).get('run_id', 'unknown')}"
+            f"{f' ({label_suffix})' if label_suffix else ''}"
         )
         args = [
             "transfer",
-            self.juno_endpoint,
+            src_endpoint or self.juno_endpoint,
             self.dst_endpoint,
             "--batch", str(batch_path),
             "--label", label,
@@ -387,6 +444,41 @@ class SciNetTransferStage:
                 f"stdout: {result.stdout}\nstderr: {result.stderr}"
             ) from exc
         return task_id
+
+    def _copy_run_folder(self) -> None:
+        """
+        Copy this run's local folder (logs, query results, cfg.yaml, and the
+        batch file / manifest just written for the data transfer) into the
+        same project folder on the destination, mirroring the local
+        outputs/runs/<run_id>/ layout under dst_root.
+
+        Requires globus.local_endpoint (the endpoint for wherever `agir-cv`
+        runs); skipped with a log message if that isn't configured.
+        """
+        pairs = _collect_run_folder_pairs(self.run_root, self.dst_root)
+        self.run_folder_pairs = pairs
+        if not pairs:
+            return
+
+        if not self.local_endpoint:
+            log.info(
+                f"Not copying the run folder ({len(pairs)} files: logs, query "
+                "results, cfg.yaml, ...): set globus.local_endpoint in "
+                "conf/globus/default.yaml to enable this."
+            )
+            return
+
+        batch_path = self.run_root / "run_folder_batch.txt"
+        _build_batch_file(pairs, self.dst_root, batch_path)
+        log.info(f"Copying {len(pairs)} run-folder files to {self.dst_root}")
+
+        self.run_folder_task_id = self._submit_transfer(
+            batch_path, src_endpoint=self.local_endpoint, label_suffix="run folder"
+        )
+        log.info(f"Run-folder copy task submitted: {self.run_folder_task_id}")
+
+        if self.wait:
+            self._wait_for_task(self.run_folder_task_id)
 
     def _wait_for_task(self, task_id: str) -> None:
         """Poll ``globus task show`` until terminal state or timeout."""

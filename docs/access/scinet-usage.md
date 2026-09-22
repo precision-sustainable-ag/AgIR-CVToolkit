@@ -76,6 +76,8 @@ agir-cv query --db semif --preview 5 --limit 5
 
 2. Fill in the endpoint IDs in `src/agir_cvtoolkit/conf/globus/default.yaml`: `juno_endpoint`, and `endpoint` under `destinations.ceres` (and `atlas` if you use it). They are blank in the repository. The same file sets the destination folders.
 
+3. If you also want the run folder copied alongside the files (see [Where files land](#where-files-land) below), set `local_endpoint` in the same file to the endpoint for wherever you run `agir-cv` (usually `SCINet-Ceres`, the same ID as `destinations.ceres.endpoint`). Leave it blank to skip that copy; the file transfer itself does not need it.
+
 **Transfer**
 
 ```bash
@@ -92,11 +94,33 @@ agir-cv scinet-transfer --dst atlas --submit
 Both the dry run and `--submit` print the destination folder the files land in (or would land in), and a Globus link that opens that folder for the destination you picked:
 
 ```
-Files would land in: /90daydata/dash_agir/tmp/semifield-cutouts/NC_2023-07-11/  (on ceres)
+Files would land in: /90daydata/dash_agir/tmp/demo/big-soy/semifield-cutouts/NC_2023-07-11/  (on ceres)
 Globus link to that folder: https://app.globus.org/file-manager?origin_id=...&origin_path=...
 ```
 
-Each file keeps its path from the database under the destination's root, so a query spanning several batches lands in `.../semifield-cutouts/` with one subfolder per batch, and a single-batch query lands directly in that batch's folder.
+### Where files land
+
+The destination folder for each named destination (`ceres`, `atlas`, ...) is a **shared root** — everyone's transfers use the same `dst_root` in `conf/globus/default.yaml`. To keep them apart, `agir-cv` namespaces it by your run's `project.name` and `project.subname` (the same values behind the local `outputs/runs/<project.name>/<project.subname>/` folder):
+
+```
+<dst_root>/<project.name>/<project.subname>/semifield-cutouts/<batch_id>/<file>
+```
+
+So `project.name=demo`, `project.subname=big-soy` (the defaults are `test`/`001` — see `conf/config.yaml`, or set them with `-o project.name=... -o project.subname=...`) lands at `.../demo/big-soy/semifield-cutouts/NC_2023-07-11/...`. A query spanning several batches lands in `.../demo/big-soy/semifield-cutouts/` with one subfolder per batch.
+
+**The run folder comes along too.** If `globus.local_endpoint` is set (see step 3 above), `scinet-transfer` also copies this run's local folder — `cfg.yaml`, `logs/`, `query/` (your query results), `globus_batch.txt` and its manifest — into that same project folder, so the destination ends up mirroring your local `outputs/runs/demo/big-soy/` exactly:
+
+```
+demo/big-soy/                          # on the destination, under dst_root
+├── semifield-cutouts/NC_2023-07-11/   # the actual cutout files
+├── cfg.yaml
+├── logs/
+├── query/
+├── globus_batch.txt
+└── scinet_transfer_manifest.json
+```
+
+This is a second, separate Globus transfer (source: `local_endpoint`, same destination), so it gets its own task ID. Without `local_endpoint` set, `scinet-transfer` says how many run-folder files it would have copied and skips them; the data transfer still runs normally.
 
 {: .tip }
 > Add `--filters "cutout_juno_url is not null"` to the query you transfer from. The transfer lists the four file paths of every row, so rows without cutouts would ask for files that do not exist. If a query does return rows with no file paths, `scinet-transfer` says why (for example, that the rows look like zero-detection placeholder rows) instead of transferring nothing silently.
